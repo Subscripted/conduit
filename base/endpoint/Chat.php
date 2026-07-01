@@ -5,9 +5,13 @@ namespace endpoint;
 use AbstractLLMEndpoint;
 use entity\ChatResponse;
 use factory\AdapterFactory;
+use traits\HasTools;
 
 class Chat extends AbstractLLMEndpoint
 {
+
+    use HasTools;
+
     private array $context = [];
     private array $content = [];
     private string $instruction;
@@ -36,6 +40,7 @@ class Chat extends AbstractLLMEndpoint
                 'user' => $this->user ?? 'user',
                 'context' => $this->context,
                 'content' => $this->content,
+                'tools' => $this->getTools(),
             ]);
             return ChatResponse::fromArray($normalized);
         } catch (\RuntimeException $e) {

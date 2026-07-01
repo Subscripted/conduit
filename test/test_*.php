@@ -3,6 +3,7 @@
 use entity\core\Content;
 use type\AIProvider;
 use client\LLMClient;
+use entity\core\Tool;
 
 $files = [];
 
@@ -26,6 +27,10 @@ $chatResponse = $client->chat()
             Content::text('Dazu habe ich noch 1 Bild was du dir anschauen sollst:'),
             Content::image('https://machmal.de/boah.png'),
             Content::text('Check da mal was rum.')
+        ]
+    )->tools(
+        [
+            Tool::webSearch(),
         ]
     )
     ->call();

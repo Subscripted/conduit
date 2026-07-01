@@ -49,4 +49,44 @@ class OpenAIAdapter extends AbstractLLMAdapter
 
         return $messages;
     }
+
+    private function transformTools(array $tools): array
+    {
+        $result = [];
+
+        foreach ($tools as $tool) {
+            $result[] = match ($tool['_prism_type']) {
+                'web_search' => array_filter([
+                    'type'                => 'web_search',
+                    'search_context_size' => $tool['context_size'] ?? 'medium',
+                    'user_location'       => $tool['user_location'] ?? null,
+                    'filters'             => array_filter([
+                        'allowed_domains' => $tool['allowed_domains'] ?? null,
+                        'blocked_domains' => $tool['blocked_domains'] ?? null,
+                    ]) ?: null,
+                ]),
+
+                'mcp' => array_filter([
+                    'type'             => 'mcp',
+                    'server_label'     => $tool['name'],
+                    'server_url'       => $tool['url'],
+                    'require_approval' => $tool['require_approval'] ?? 'always',
+                    'allowed_tools'    => $tool['allowed_tools'] ?? null,
+                ]),
+
+                'function' => [
+                    'type'     => 'function',
+                    'function' => [
+                        'name'        => $tool['name'],
+                        'description' => $tool['description'],
+                        'parameters'  => $tool['parameters'],
+                    ],
+                ],
+
+                default => null,
+            };
+        }
+
+        return array_filter($result);
+    }
 }
