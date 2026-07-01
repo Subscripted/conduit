@@ -4,7 +4,7 @@ namespace endpoint;
 
 use AbstractLLMEndpoint;
 use entity\ChatResponse;
-use type\AIProvider;
+use factory\AdapterFactory;
 
 class Chat extends AbstractLLMEndpoint
 {
@@ -13,28 +13,34 @@ class Chat extends AbstractLLMEndpoint
     private string $instruction;
     private string $user;
 
-    public function __construct(string $API_KEY, \LLMClient $client)
+    public function __construct(private readonly string $apiKey, \LLMClient $client)
     {
-        parent::__construct($API_KEY, $client);
+        parent::__construct($apiKey, $client);
     }
 
 
+    /**
+     * @throws \Exception
+     */
     function call(): ChatResponse
     {
-        $response = new ChatResponse();
-        switch ($this->client->getAIProvider()) {
-            case AIProvider::OpenAI:
-                break;
+        $adapter = AdapterFactory::make(
+            $this->client->getAIProvider(),
+            $this->apiKey
+        );
 
-            case AIProvider::Antrophic:
-                break;
-
-
-            case AIProvider::Google:
-                break;
+        try {
+            $normalized = $adapter->call([
+                'model' => $this->model,
+                'instruction' => $this->instruction ?? null,
+                'user' => $this->user ?? 'user',
+                'context' => $this->context,
+                'content' => $this->content,
+            ]);
+            return ChatResponse::fromArray($normalized);
+        } catch (\RuntimeException $e) {
+            return ChatResponse::error($e->getMessage());
         }
-
-        return $response;
     }
 
     public function model(string $model): self

@@ -2,8 +2,7 @@
 
 use entity\core\Content;
 use type\AIProvider;
-
-require "base\client\LLMClient.php";
+use client\LLMClient;
 
 $files = [];
 

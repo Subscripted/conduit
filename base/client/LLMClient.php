@@ -1,6 +1,9 @@
 <?php
 
+namespace client;
 use endpoint\Chat;
+use Exception;
+use RuntimeException;
 use type\AIProvider;
 
 class LLMClient
