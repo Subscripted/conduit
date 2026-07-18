@@ -3,6 +3,6 @@
 interface LLMAdapter
 {
 
-    public function call(array $payload) : array;
+    public function call(string $endpoint,array $payload) : array;
 
 }

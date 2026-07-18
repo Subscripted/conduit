@@ -6,6 +6,7 @@ use AbstractLLMEndpoint;
 use entity\ChatResponse;
 use factory\AdapterFactory;
 use traits\HasTools;
+use client\LLMClient;
 
 class Chat extends AbstractLLMEndpoint
 {
@@ -16,8 +17,9 @@ class Chat extends AbstractLLMEndpoint
     private array $content = [];
     private string $instruction;
     private string $user;
+    private int $iMaxTokens = 100;
 
-    public function __construct(private readonly string $apiKey, \LLMClient $client)
+    public function __construct(private readonly string $apiKey, LLMClient $client)
     {
         parent::__construct($apiKey, $client);
     }
@@ -34,9 +36,10 @@ class Chat extends AbstractLLMEndpoint
         );
 
         try {
-            $normalized = $adapter->call([
+            $normalized = $adapter->call('responses', [
                 'model' => $this->model,
                 'instruction' => $this->instruction ?? null,
+                'maxTokens' => $this->iMaxTokens,
                 'user' => $this->user ?? 'user',
                 'context' => $this->context,
                 'content' => $this->content,
@@ -77,6 +80,12 @@ class Chat extends AbstractLLMEndpoint
     public function user(string $user): self
     {
         $this->user = $user;
+        return $this;
+    }
+
+    public function maxTokens(int $maxTokens): self
+    {
+        $this->iMaxTokens = $maxTokens;
         return $this;
     }
 }

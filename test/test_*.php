@@ -1,6 +1,7 @@
 <?php
 
 use entity\core\Content;
+use entity\core\Context;
 use type\AIProvider;
 use client\LLMClient;
 use entity\core\Tool;
@@ -16,8 +17,12 @@ $chatResponse = $client->chat()
     ->user('user')
     ->model('opus-4.6')
     ->instruction('Doah')
+    ->maxTokens(2300)
     ->context(
         [
+            Context::user(
+                Content::text('Test')
+            )
         ]
     )
     ->content(
@@ -31,11 +36,13 @@ $chatResponse = $client->chat()
     )->tools(
         [
             Tool::webSearch(),
+            Tool::imageGeneration()
         ]
     )
     ->call();
 if (empty($chatResponse->getErrors())) {
     $success = true;
 }
+
 
 

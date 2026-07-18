@@ -67,4 +67,31 @@ class Tool
             'timezone' => $timezone,
         ]);
     }
+
+
+    public static function imageGeneration(
+        ?string $model = null,
+        ?string $size = null,
+        ?string $quality = null,
+        ?string $background = null,
+        ?string $moderation = null,
+        ?string $inputFidelity = null,
+        ?string $outputFormat = null,
+        ?int    $outputCompression = null,
+        ?int    $partialImages = null,
+    ): array
+    {
+        return array_filter([
+            '_prism_type' => 'image_generation',
+            'model' => $model,
+            'size' => $size,
+            'quality' => $quality,
+            'background' => $background,
+            'moderation' => $moderation,
+            'input_fidelity' => $inputFidelity,
+            'output_format' => $outputFormat,
+            'output_compression' => $outputCompression,
+            'partial_images' => $partialImages,
+        ], fn ($v) => $v !== null);
+    }
 }
