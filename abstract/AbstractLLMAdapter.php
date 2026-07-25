@@ -4,44 +4,43 @@ abstract class AbstractLLMAdapter implements LLMAdapter
 {
     abstract protected function headers(): array;
 
-    protected function request(string $url, array $payload): array
+    protected function request(string $sUrl, array $aPayload): array
     {
-        $json = json_encode($payload);
+        $sJson  = json_encode($aPayload);
+        $oCurl  = curl_init($sUrl);
 
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        curl_setopt_array($oCurl, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => $json,
+            CURLOPT_POSTFIELDS     => $sJson,
             CURLOPT_HTTPHEADER     => $this->buildHeaders(),
             CURLOPT_TIMEOUT        => 30,
         ]);
 
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
+        $sResponse  = curl_exec($oCurl);
+        $iHttpCode  = curl_getinfo($oCurl, CURLINFO_HTTP_CODE);
+        $sCurlError = curl_error($oCurl);
 
-        if ($curlError) {
-            throw new \RuntimeException("cURL Fehler: {$curlError}");
+        if ($sCurlError) {
+            throw new \RuntimeException("cURL error: {$sCurlError}");
         }
 
-        $decoded = json_decode($response, true);
+        $aDecoded = json_decode($sResponse, true);
 
-        if ($httpCode >= 400) {
-            $errorMessage = $decoded['error']['message'] ?? $response;
-            throw new \RuntimeException("API Fehler {$httpCode}: {$errorMessage}");
+        if ($iHttpCode >= 400) {
+            $sErrorMessage = $aDecoded['error']['message'] ?? $sResponse;
+            throw new \RuntimeException("API error {$iHttpCode}: {$sErrorMessage}");
         }
 
-        return $decoded;
+        return $aDecoded;
     }
 
     private function buildHeaders(): array
     {
-        $formatted = ['Content-Type: application/json'];
-        foreach ($this->headers() as $key => $value) {
-            $formatted[] = "{$key}: {$value}";
+        $aFormatted = ['Content-Type: application/json'];
+        foreach ($this->headers() as $sKey => $sValue) {
+            $aFormatted[] = "{$sKey}: {$sValue}";
         }
-        return $formatted;
+        return $aFormatted;
     }
 }

@@ -3,89 +3,82 @@
 namespace endpoint;
 
 use AbstractLLMEndpoint;
-use entity\ChatResponse;
+use client\LLMClient;
+use entity\dto\ChatResponse;
 use factory\AdapterFactory;
 use traits\HasTools;
-use client\LLMClient;
 
 class Chat extends AbstractLLMEndpoint
 {
-
     use HasTools;
 
-    private array $context = [];
-    private array $content = [];
-    private string $instruction;
-    private string $user;
-    private int $iMaxTokens = 100;
+    private array  $aContext     = [];
+    private array  $aContent     = [];
+    private string $sInstruction = '';
+    private string $sUser        = 'user';
+    private int    $iMaxTokens   = 1024;
 
-    public function __construct(private readonly string $apiKey, LLMClient $client)
+    public function __construct(string $sApiKey, LLMClient $oClient)
     {
-        parent::__construct($apiKey, $client);
+        parent::__construct($sApiKey, $oClient);
     }
 
-
-    /**
-     * @throws \Exception
-     */
-    function call(): ChatResponse
+    public function call(): ChatResponse
     {
-        $adapter = AdapterFactory::make(
-            $this->client->getAIProvider(),
-            $this->apiKey
+        $oAdapter = AdapterFactory::make(
+            $this->oClient->getAIProvider(),
+            $this->sApiKey
         );
 
         try {
-            $normalized = $adapter->call('responses', [
-                'model' => $this->model,
-                'instruction' => $this->instruction ?? null,
-                'maxTokens' => $this->iMaxTokens,
-                'user' => $this->user ?? 'user',
-                'context' => $this->context,
-                'content' => $this->content,
-                'tools' => $this->getTools(),
+            $aNormalized = $oAdapter->chat([
+                'model'       => $this->sModel,
+                'instruction' => $this->sInstruction ?: null,
+                'maxTokens'   => $this->iMaxTokens,
+                'user'        => $this->sUser,
+                'context'     => $this->aContext,
+                'content'     => $this->aContent,
+                'tools'       => $this->getTools(),
             ]);
-            return ChatResponse::fromArray($normalized);
-        } catch (\RuntimeException $e) {
-            return ChatResponse::error($e->getMessage());
+            return ChatResponse::fromArray($aNormalized);
+        } catch (\RuntimeException $oException) {
+            return ChatResponse::error($oException->getMessage());
         }
     }
 
-    public function model(string $model): self
+    public function model(string $sModel): self
     {
-        $this->model = $model;
+        $this->sModel = $sModel;
         return $this;
     }
 
-    public function context(array $context = []): self
+    public function context(array $aContext): self
     {
-        $this->context = $context;
+        $this->aContext = $aContext;
         return $this;
     }
 
-    public function content(array $content = []): self
+    public function content(array $aContent): self
     {
-        $this->content = $content;
+        $this->aContent = $aContent;
         return $this;
     }
 
-
-    public function instruction(string $instruction): self
+    public function instruction(string $sInstruction): self
     {
-        $this->instruction = $instruction;
+        $this->sInstruction = $sInstruction;
         return $this;
     }
 
-
-    public function user(string $user): self
+    public function user(string $sUser): self
     {
-        $this->user = $user;
+        $this->sUser = $sUser;
         return $this;
     }
 
-    public function maxTokens(int $maxTokens): self
+    public function maxTokens(int $iMaxTokens): self
     {
-        $this->iMaxTokens = $maxTokens;
+        $this->iMaxTokens = $iMaxTokens;
         return $this;
     }
 }

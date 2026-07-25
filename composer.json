@@ -1,5 +1,11 @@
 {
   "require": {
     "ext-curl": "*"
+  },
+  "autoload": {
+    "classmap": [
+      "abstract/",
+      "base/"
+    ]
   }
 }

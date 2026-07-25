@@ -4,15 +4,15 @@ use client\LLMClient;
 
 abstract class AbstractLLMEndpoint
 {
+    protected string    $sApiKey;
+    protected LLMClient $oClient;
+    protected string    $sModel;
 
-    protected string $API_KEY;
-    protected LLMClient $client;
-    protected string $model;
-
-
-    public function __construct(string $API_KEY, LLMClient $client){
-        $this->API_KEY = $API_KEY;
+    public function __construct(string $sApiKey, LLMClient $oClient)
+    {
+        $this->sApiKey = $sApiKey;
+        $this->oClient = $oClient;
     }
 
-    abstract function call() : object;
+    abstract public function call(): object;
 }

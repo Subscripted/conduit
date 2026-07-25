@@ -6,5 +6,24 @@ $vendorDir = dirname(__DIR__);
 $baseDir = dirname($vendorDir);
 
 return array(
+    'AbstractLLMAdapter' => $baseDir . '/abstract/AbstractLLMAdapter.php',
+    'AbstractLLMEndpoint' => $baseDir . '/abstract/AbstractLLMEndpoint.php',
+    'Castable' => $baseDir . '/abstract/interface/Castable.php',
     'Composer\\InstalledVersions' => $vendorDir . '/composer/InstalledVersions.php',
+    'Hydratable' => $baseDir . '/abstract/interface/Hydratable.php',
+    'LLMAdapter' => $baseDir . '/abstract/interface/LLMAdapter.php',
+    'Returnable' => $baseDir . '/abstract/interface/Returnable.php',
+    'adapter\\AnthropicAdapter' => $baseDir . '/base/adapter/AnthropicAdapter.php',
+    'adapter\\OpenAIAdapter' => $baseDir . '/base/adapter/OpenAIAdapter.php',
+    'client\\LLMClient' => $baseDir . '/base/client/LLMClient.php',
+    'endpoint\\Chat' => $baseDir . '/base/endpoint/Chat.php',
+    'entity\\core\\Content' => $baseDir . '/base/entity/core/Content.php',
+    'entity\\core\\Context' => $baseDir . '/base/entity/core/Context.php',
+    'entity\\core\\Tool' => $baseDir . '/base/entity/core/Tool.php',
+    'entity\\dto\\ChatOutput' => $baseDir . '/base/entity/dto/ChatOutput.php',
+    'entity\\dto\\ChatResponse' => $baseDir . '/base/entity/dto/ChatResponse.php',
+    'factory\\AdapterFactory' => $baseDir . '/base/factory/AdapterFactory.php',
+    'traits\\HasTools' => $baseDir . '/base/traits/HasTools.php',
+    'type\\AIProvider' => $baseDir . '/base/typ/AIProvider.php',
+    'type\\OutputType' => $baseDir . '/base/typ/OutputType.php',
 );

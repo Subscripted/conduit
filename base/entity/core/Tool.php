@@ -5,93 +5,85 @@ namespace entity\core;
 class Tool
 {
     public static function webSearch(
-        array  $allowedDomains = [],
-        array  $blockedDomains = [],
-        ?int   $maxUses = null,
-        ?array $userLocation = null,
-        string $contextSize = 'medium',
-    ): array
-    {
-        return array_filter([
-            '_prism_type' => 'web_search',
-            'allowed_domains' => $allowedDomains ?: null,
-            'blocked_domains' => $blockedDomains ?: null,
-            'max_uses' => $maxUses,
-            'user_location' => $userLocation,
-            'context_size' => $contextSize,
-        ]);
+        array  $aAllowedDomains = [],
+        array  $aBlockedDomains = [],
+        ?int   $iMaxUses = null,
+        ?array $aUserLocation = null,
+        string $sContextSize = 'medium',
+    ): array {
+        $aResult = ['_type' => 'web_search', 'context_size' => $sContextSize];
+        if (!empty($aAllowedDomains)) $aResult['allowed_domains'] = $aAllowedDomains;
+        if (!empty($aBlockedDomains)) $aResult['blocked_domains'] = $aBlockedDomains;
+        if ($iMaxUses !== null)       $aResult['max_uses']        = $iMaxUses;
+        if ($aUserLocation !== null)  $aResult['user_location']   = $aUserLocation;
+        return $aResult;
     }
 
-    public static function mcp(
-        string $name,
-        string $url,
-        string $requireApproval = 'always',
-        array  $allowedTools = [],
-    ): array
-    {
-        return array_filter([
-            '_prism_type' => 'mcp',
-            'name' => $name,
-            'url' => $url,
-            'require_approval' => $requireApproval,
-            'allowed_tools' => $allowedTools ?: null,
-        ]);
-    }
-
-    public static function function (
-        string $name,
-        string $description,
-        array  $parameters,
-    ): array
-    {
+    public static function function(
+        string $sName,
+        string $sDescription,
+        array  $aParameters,
+    ): array {
         return [
-            '_prism_type' => 'function',
-            'name' => $name,
-            'description' => $description,
-            'parameters' => $parameters,
+            '_type'       => 'function',
+            'name'        => $sName,
+            'description' => $sDescription,
+            'parameters'  => $aParameters,
         ];
     }
 
-    public static function location(
-        string  $country,
-        ?string $city = null,
-        ?string $region = null,
-        ?string $timezone = null,
-    ): array
-    {
-        return array_filter([
-            'type' => 'approximate',
-            'country' => $country,
-            'city' => $city,
-            'region' => $region,
-            'timezone' => $timezone,
-        ]);
+    public static function imageGeneration(
+        ?string $sModel = null,
+        ?string $sSize = null,
+        ?string $sQuality = null,
+        ?string $sBackground = null,
+        ?string $sModeration = null,
+        ?string $sInputFidelity = null,
+        ?string $sOutputFormat = null,
+        ?int    $iOutputCompression = null,
+        ?int    $iPartialImages = null,
+    ): array {
+        $aResult = ['_type' => 'image_generation'];
+        if ($sModel !== null)            $aResult['model']              = $sModel;
+        if ($sSize !== null)             $aResult['size']               = $sSize;
+        if ($sQuality !== null)          $aResult['quality']            = $sQuality;
+        if ($sBackground !== null)       $aResult['background']         = $sBackground;
+        if ($sModeration !== null)       $aResult['moderation']         = $sModeration;
+        if ($sInputFidelity !== null)    $aResult['input_fidelity']     = $sInputFidelity;
+        if ($sOutputFormat !== null)     $aResult['output_format']      = $sOutputFormat;
+        if ($iOutputCompression !== null)$aResult['output_compression'] = $iOutputCompression;
+        if ($iPartialImages !== null)    $aResult['partial_images']     = $iPartialImages;
+        return $aResult;
     }
 
+    public static function mcp(
+        string $sName,
+        string $sUrl,
+        string $sRequireApproval = 'always',
+        array  $aAllowedTools = [],
+    ): array {
+        $aResult = [
+            '_type'            => 'mcp',
+            'name'             => $sName,
+            'url'              => $sUrl,
+            'require_approval' => $sRequireApproval,
+        ];
+        if (!empty($aAllowedTools)) {
+            $aResult['allowed_tools'] = $aAllowedTools;
+        }
+        return $aResult;
+    }
 
-    public static function imageGeneration(
-        ?string $model = null,
-        ?string $size = null,
-        ?string $quality = null,
-        ?string $background = null,
-        ?string $moderation = null,
-        ?string $inputFidelity = null,
-        ?string $outputFormat = null,
-        ?int    $outputCompression = null,
-        ?int    $partialImages = null,
-    ): array
-    {
-        return array_filter([
-            '_prism_type' => 'image_generation',
-            'model' => $model,
-            'size' => $size,
-            'quality' => $quality,
-            'background' => $background,
-            'moderation' => $moderation,
-            'input_fidelity' => $inputFidelity,
-            'output_format' => $outputFormat,
-            'output_compression' => $outputCompression,
-            'partial_images' => $partialImages,
-        ], fn ($v) => $v !== null);
+    public static function location(
+        string  $sCountry,
+        ?string $sCity = null,
+        ?string $sRegion = null,
+        ?string $sTimezone = null,
+    ): array {
+        $aResult = ['type' => 'approximate', 'country' => $sCountry];
+        if ($sCity !== null)     $aResult['city']     = $sCity;
+        if ($sRegion !== null)   $aResult['region']   = $sRegion;
+        if ($sTimezone !== null) $aResult['timezone'] = $sTimezone;
+        return $aResult;
     }
 }

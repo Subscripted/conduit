@@ -2,7 +2,5 @@
 
 interface LLMAdapter
 {
-
-    public function call(string $endpoint,array $payload) : array;
-
+    public function chat(array $aPayload): array;
 }

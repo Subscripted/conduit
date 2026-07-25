@@ -1,29 +1,30 @@
 <?php
 
 namespace traits;
+
 trait HasTools
 {
-    private array $tools = [];
+    private array $aTools = [];
 
-    public function tools(array $tools): static
+    public function tools(array $aTools): static
     {
-        $this->tools = $tools;
+        $this->aTools = $aTools;
         return $this;
     }
 
-    public function addTool(array $tool): static
+    public function addTool(array $aTool): static
     {
-        $this->tools[] = $tool;
+        $this->aTools[] = $aTool;
         return $this;
     }
 
     public function getTools(): array
     {
-        return $this->tools;
+        return $this->aTools;
     }
 
     public function hasTools(): bool
     {
-        return !empty($this->tools);
+        return !empty($this->aTools);
     }
 }

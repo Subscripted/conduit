@@ -2,20 +2,19 @@
 
 namespace factory;
 
+use adapter\AnthropicAdapter;
 use adapter\OpenAIAdapter;
 use LLMAdapter;
 use type\AIProvider;
 
 class AdapterFactory
 {
-
-    public static function make(AIProvider $AIProvider, string $apiKey): LLMAdapter
+    public static function make(AIProvider $oProvider, string $sApiKey): LLMAdapter
     {
-        return match ($AIProvider) {
-            AIProvider::OpenAI => new OpenAIAdapter($apiKey),
-            AIProvider::Antrophic => throw new \Exception('To be implemented'),
-            AIProvider::Google => throw new \Exception('To be implemented'),
+        return match ($oProvider) {
+            AIProvider::OpenAI    => new OpenAIAdapter($sApiKey),
+            AIProvider::Anthropic => new AnthropicAdapter($sApiKey),
+            AIProvider::Google    => throw new \RuntimeException('Google adapter not yet implemented'),
         };
     }
-
 }

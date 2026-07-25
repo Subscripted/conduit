@@ -1,53 +1,44 @@
 <?php
 
 namespace client;
+
 use endpoint\Chat;
-use Exception;
 use RuntimeException;
 use type\AIProvider;
 
 class LLMClient
 {
-    private AIProvider $AIProvider;
-    private string $API_KEY;
+    private AIProvider $oProvider;
 
-    /**
-     * @throws Exception
-     */
-    public function __construct(string $API_KEY)
+    public function __construct(private readonly string $sApiKey)
     {
-        if (empty($API_KEY)) {
-            throw new Exception("API Key may not be empty");
+        if (empty($sApiKey)) {
+            throw new \InvalidArgumentException('API key may not be empty');
         }
-
-        $this->API_KEY = $API_KEY;
     }
 
     public function chat(): Chat
     {
-        if (!isset($this->AIProvider)) {
-            throw new RuntimeException('AIProvider not set! Use ...->setAIProvider(enum:AIProvider)');
-        }
-        return new Chat($this->API_KEY, $this);
+        $this->assertProviderSet();
+        return new Chat($this->sApiKey, $this);
     }
 
-
-    public function image()
+    public function setAIProvider(AIProvider $oProvider): self
     {
-        if (!isset($this->AIProvider)) {
-            throw new RuntimeException('AIProvider not set! Use ...->setAIProvider(enum:AIProvider)');
-        }
-    }
-
-    public function setAIProvider(AIProvider $AIProvider): void
-    {
-        $this->AIProvider = $AIProvider;
+        $this->oProvider = $oProvider;
+        return $this;
     }
 
     public function getAIProvider(): AIProvider
     {
-        return $this->AIProvider;
+        $this->assertProviderSet();
+        return $this->oProvider;
     }
 
-
+    private function assertProviderSet(): void
+    {
+        if (!isset($this->oProvider)) {
+            throw new RuntimeException('No AIProvider set. Call setAIProvider(AIProvider::...) first.');
+        }
+    }
 }
