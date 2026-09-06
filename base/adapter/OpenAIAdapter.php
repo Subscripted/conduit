@@ -4,17 +4,44 @@ namespace adapter;
 
 use AbstractLLMAdapter;
 
+/**
+ * Adapter for the OpenAI Responses API and the Images API.
+ *
+ * https://platform.openai.com/docs/api-reference/responses
+ * https://platform.openai.com/docs/api-reference/images
+ *
+ * Translates the provider-neutral payload into the body of the OpenAI
+ * endpoints and the response back into the normalized array that
+ * ChatResponse / ImageResponse are built from. The rest of the application
+ * therefore only knows the neutral format and no OpenAI specifics.
+ */
 class OpenAIAdapter extends AbstractLLMAdapter
 {
-    private const BASE_URL = 'https://api.openai.com/v1';
+    private const string BASE_URL = 'https://api.openai.com/v1';
 
+    /**
+     * @param string $sApiKey API key of the OpenAI account.
+     */
     public function __construct(private readonly string $sApiKey) {}
 
+    /**
+     * Provider-specific headers for every request.
+     *
+     * @return array Header name => value.
+     */
     protected function headers(): array
     {
         return ['Authorization' => 'Bearer ' . $this->sApiKey];
     }
 
+    /**
+     * Sends a chat request to the Responses API.
+     *
+     * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
+     *                        content, user, tools, effort, effortSummary.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @throws \RuntimeException If the HTTP request or the API fails.
+     */
     public function chat(array $aPayload): array
     {
         $aBody = [
@@ -28,6 +55,12 @@ class OpenAIAdapter extends AbstractLLMAdapter
         if (!empty($aPayload['maxTokens'])) {
             $aBody['max_output_tokens'] = $aPayload['maxTokens'];
         }
+        if (!empty($aPayload['effort'])) {
+            $aBody['reasoning'] = ['effort' => $aPayload['effort']];
+            if (!empty($aPayload['effortSummary'])) {
+                $aBody['reasoning']['summary'] = 'auto';
+            }
+        }
         if (!empty($aPayload['tools'])) {
             $aBuiltTools = $this->buildTools($aPayload['tools']);
             if (!empty($aBuiltTools)) {
@@ -39,8 +72,43 @@ class OpenAIAdapter extends AbstractLLMAdapter
         return $this->normalizeResponse($aRaw);
     }
 
+    /**
+     * Creates or edits an image via the Images API. Uses /images/edits
+     * because the endpoint also works without input images and thus covers
+     * both cases. For pure text-to-image requests, switch to /images/generations.
+     *
+     * @param array $aPayload Neutral payload: model, prompt, images, size, quality, outputFormat.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @throws \RuntimeException If the HTTP request or the API fails.
+     */
+    public function image(array $aPayload): array
+    {
+        $aBody = [
+            'model'  => $aPayload['model'],
+            'prompt' => $aPayload['prompt'],
+        ];
+
+        foreach ($aPayload['images'] ?? [] as $sUrl) {
+            $aBody['images'][] = ['image_url' => $sUrl];
+        }
+
+        if (!empty($aPayload['size']))         $aBody['size']          = $aPayload['size'];
+        if (!empty($aPayload['quality']))      $aBody['quality']       = $aPayload['quality'];
+        if (!empty($aPayload['outputFormat'])) $aBody['output_format'] = $aPayload['outputFormat'];
+
+        $aRaw = $this->request(self::BASE_URL . '/images/edits', $aBody);
+        return $this->normalizeImageResponse($aRaw);
+    }
+
     // ── Input builder ─────────────────────────────────────────────────────
 
+    /**
+     * Builds the input list from the conversation history plus the current
+     * user input.
+     *
+     * @param array $aPayload Neutral payload with context, content and user.
+     * @return array List of messages with role and content.
+     */
     private function buildInput(array $aPayload): array
     {
         $aMessages = [];
@@ -49,14 +117,24 @@ class OpenAIAdapter extends AbstractLLMAdapter
             $aMessages[] = $this->transformContextMessage($aMessage);
         }
 
+        $sRole = $aPayload['user'] ?? 'user';
+
         $aMessages[] = [
-            'role'    => $aPayload['user'] ?? 'user',
-            'content' => $this->transformContent($aPayload['content'] ?? []),
+            'role'    => $sRole,
+            'content' => $this->transformContent($aPayload['content'] ?? [], $sRole),
         ];
 
         return $aMessages;
     }
 
+    /**
+     * Translates a message from the conversation history into the OpenAI
+     * format. Tool-call results are not a message with a role there but a
+     * separate item of type function_call_output.
+     *
+     * @param array $aMessage Message with role, content and, for tool results, tool_call_id.
+     * @return array Item in the OpenAI format.
+     */
     private function transformContextMessage(array $aMessage): array
     {
         if ($aMessage['role'] === 'tool_result') {
@@ -73,22 +151,41 @@ class OpenAIAdapter extends AbstractLLMAdapter
             'role'    => $aMessage['role'],
             'content' => is_string($mContent)
                 ? $mContent
-                : $this->transformContent($this->wrapIfSingleBlock($mContent)),
+                : $this->transformContent($this->wrapIfSingleBlock($mContent), $aMessage['role']),
         ];
     }
 
+    /**
+     * Wraps a single content block in a list so transformContent() can
+     * iterate over blocks uniformly.
+     *
+     * @param array $aContent A single block or already a list of blocks.
+     * @return array List of blocks.
+     */
     private function wrapIfSingleBlock(array $aContent): array
     {
         return array_is_list($aContent) ? $aContent : [$aContent];
     }
 
-    private function transformContent(array $aContent): array
+    /**
+     * Translates the neutral content blocks into OpenAI blocks.
+     *
+     * The text type depends on the role: what came from the model must be
+     * sent back as output_text, everything else as input_text. Base64 images
+     * and files go as a data: URI, unknown types are passed through unchanged.
+     *
+     * @param array  $aContent Blocks from Content::text(), ::image() and ::file().
+     * @param string $sRole    Role of the message, drives the text type (default 'user').
+     * @return array Blocks in the OpenAI format.
+     */
+    private function transformContent(array $aContent, string $sRole = 'user'): array
     {
-        $aResult = [];
+        $sTextType = $sRole === 'assistant' ? 'output_text' : 'input_text';
+        $aResult   = [];
         foreach ($aContent as $aBlock) {
             switch ($aBlock['type'] ?? '') {
                 case 'text':
-                    $aResult[] = ['type' => 'input_text', 'text' => $aBlock['text']];
+                    $aResult[] = ['type' => $sTextType, 'text' => $aBlock['text']];
                     break;
                 case 'image':
                     if (isset($aBlock['url'])) {
@@ -119,6 +216,15 @@ class OpenAIAdapter extends AbstractLLMAdapter
 
     // ── Tool builder ──────────────────────────────────────────────────────
 
+    /**
+     * Translates the neutral tool definitions into the OpenAI format.
+     * Optional values are only set when filled so the API uses its own
+     * defaults. Unknown tool types are silently skipped.
+     *
+     * @param array $aTools Tool definitions from Tool::webSearch(), ::function(),
+     *                      ::imageGeneration() and ::mcp().
+     * @return array Tools in the OpenAI format, empty when none is supported.
+     */
     private function buildTools(array $aTools): array
     {
         $aResult = [];
@@ -180,6 +286,15 @@ class OpenAIAdapter extends AbstractLLMAdapter
 
     // ── Response normalizer ───────────────────────────────────────────────
 
+    /**
+     * Translates the raw Responses API answer into the neutral format for
+     * ChatResponse. A message item can hold several blocks and is unfolded.
+     * A reasoning item without a summary yields no text and is skipped so no
+     * empty thinking outputs appear.
+     *
+     * @param array $aRaw Decoded JSON answer of the Responses API.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     */
     private function normalizeResponse(array $aRaw): array
     {
         $aOutputs = [];
@@ -234,6 +349,13 @@ class OpenAIAdapter extends AbstractLLMAdapter
         ];
     }
 
+    /**
+     * Translates a single block of a message into the neutral format.
+     * Unknown block types are treated as text so the content is not lost.
+     *
+     * @param array $aBlock Block from the content array of a message.
+     * @return array Normalized output block.
+     */
     private function normalizeMessageBlock(array $aBlock): array
     {
         switch ($aBlock['type'] ?? '') {
@@ -250,6 +372,13 @@ class OpenAIAdapter extends AbstractLLMAdapter
         }
     }
 
+    /**
+     * Translates the source citations of a text block into the neutral
+     * annotations format. Unknown annotation types are passed through unchanged.
+     *
+     * @param array $aAnnotations Annotations from an output_text block.
+     * @return array List of normalized annotations.
+     */
     private function normalizeAnnotations(array $aAnnotations): array
     {
         $aResult = [];
@@ -278,6 +407,15 @@ class OpenAIAdapter extends AbstractLLMAdapter
         return $aResult;
     }
 
+    /**
+     * Normalizes the result of an image_generation_call. The tool returns
+     * either a data: URI or a URL depending on the model — for the data: URI
+     * base64 data and image format are split so the response has both separately.
+     *
+     * @param string $sResult Result of the tool call, data: URI or URL.
+     * @param string $sStatus Status of the tool call.
+     * @return array Normalized image output.
+     */
     private function normalizeImageResult(string $sResult, string $sStatus): array
     {
         if (str_starts_with($sResult, 'data:')) {
@@ -291,5 +429,32 @@ class OpenAIAdapter extends AbstractLLMAdapter
             ];
         }
         return ['type' => 'image', 'image_url' => $sResult, 'status' => $sStatus];
+    }
+
+    /**
+     * Translates the raw Images API answer into the neutral format for
+     * ImageResponse.
+     *
+     * @param array $aRaw Decoded JSON answer of the Images API.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     */
+    private function normalizeImageResponse(array $aRaw): array
+    {
+        $aOutputs = [];
+        foreach ($aRaw['data'] ?? [] as $aItem) {
+            $aOutputs[] = [
+                'image_data'   => $aItem['b64_json'] ?? '',
+                'image_format' => $aRaw['output_format'] ?? 'png',
+                'size'         => $aRaw['size'] ?? '',
+            ];
+        }
+
+        return [
+            'model'         => $aRaw['model'] ?? '',
+            'input_tokens'  => $aRaw['usage']['input_tokens'] ?? 0,
+            'output_tokens' => $aRaw['usage']['output_tokens'] ?? 0,
+            'outputs'       => $aOutputs,
+            'errors'        => [],
+        ];
     }
 }

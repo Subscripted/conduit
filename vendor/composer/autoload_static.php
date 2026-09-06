@@ -7,26 +7,34 @@ namespace Composer\Autoload;
 class ComposerStaticInitd751713988987e9331980363e24189ce
 {
     public static $classMap = array (
+        'AbstractAIResponse' => __DIR__ . '/../..' . '/abstract/AbstractAIResponse.php',
         'AbstractLLMAdapter' => __DIR__ . '/../..' . '/abstract/AbstractLLMAdapter.php',
         'AbstractLLMEndpoint' => __DIR__ . '/../..' . '/abstract/AbstractLLMEndpoint.php',
         'Castable' => __DIR__ . '/../..' . '/abstract/interface/Castable.php',
         'Composer\\InstalledVersions' => __DIR__ . '/..' . '/composer/InstalledVersions.php',
+        'ErrorCollectionInterface' => __DIR__ . '/../..' . '/abstract/interface/ErrorCollectionInterface.php',
         'Hydratable' => __DIR__ . '/../..' . '/abstract/interface/Hydratable.php',
         'LLMAdapter' => __DIR__ . '/../..' . '/abstract/interface/LLMAdapter.php',
-        'Returnable' => __DIR__ . '/../..' . '/abstract/interface/Returnable.php',
+        'Output' => __DIR__ . '/../..' . '/abstract/interface/Output.php',
         'adapter\\AnthropicAdapter' => __DIR__ . '/../..' . '/base/adapter/AnthropicAdapter.php',
         'adapter\\OpenAIAdapter' => __DIR__ . '/../..' . '/base/adapter/OpenAIAdapter.php',
         'client\\LLMClient' => __DIR__ . '/../..' . '/base/client/LLMClient.php',
         'endpoint\\Chat' => __DIR__ . '/../..' . '/base/endpoint/Chat.php',
+        'endpoint\\Image' => __DIR__ . '/../..' . '/base/endpoint/Image.php',
         'entity\\core\\Content' => __DIR__ . '/../..' . '/base/entity/core/Content.php',
         'entity\\core\\Context' => __DIR__ . '/../..' . '/base/entity/core/Context.php',
         'entity\\core\\Tool' => __DIR__ . '/../..' . '/base/entity/core/Tool.php',
         'entity\\dto\\ChatOutput' => __DIR__ . '/../..' . '/base/entity/dto/ChatOutput.php',
         'entity\\dto\\ChatResponse' => __DIR__ . '/../..' . '/base/entity/dto/ChatResponse.php',
+        'entity\\dto\\ImageOutput' => __DIR__ . '/../..' . '/base/entity/dto/ImageOutput.php',
+        'entity\\dto\\ImageResponse' => __DIR__ . '/../..' . '/base/entity/dto/ImageResponse.php',
         'factory\\AdapterFactory' => __DIR__ . '/../..' . '/base/factory/AdapterFactory.php',
+        'traits\\HasErrors' => __DIR__ . '/../..' . '/base/traits/HasErrors.php',
+        'traits\\HasImageData' => __DIR__ . '/../..' . '/base/traits/HasImageData.php',
         'traits\\HasTools' => __DIR__ . '/../..' . '/base/traits/HasTools.php',
         'type\\AIProvider' => __DIR__ . '/../..' . '/base/typ/AIProvider.php',
         'type\\OutputType' => __DIR__ . '/../..' . '/base/typ/OutputType.php',
+        'type\\ThinkingEffort' => __DIR__ . '/../..' . '/base/typ/ThinkingEffort.php',
     );
 
     public static function getInitializer(ClassLoader $loader)

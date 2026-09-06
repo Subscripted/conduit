@@ -2,8 +2,28 @@
 
 namespace entity\core;
 
+/**
+ * Tools available to the model for a request.
+ *
+ * A stateless factory: the static methods return the tool definitions
+ * passed to Chat::tools(). The key _type stays provider-neutral, the
+ * adapters translate it into their own format.
+ *
+ * Web search and web fetch cost extra on top of the tokens — allowed_domains
+ * and max_uses limit both the cost and the sources the model may use.
+ */
 class Tool
 {
+    /**
+     * Web search performed by the provider.
+     *
+     * @param array      $aAllowedDomains Only these domains may be searched.
+     * @param array      $aBlockedDomains These domains are excluded.
+     * @param int|null   $iMaxUses        Optional max number of searches per request.
+     * @param array|null $aUserLocation   Optional location from Tool::location().
+     * @param string     $sContextSize    Amount of search result context (low, medium, high).
+     * @return array Tool definition of type web_search.
+     */
     public static function webSearch(
         array  $aAllowedDomains = [],
         array  $aBlockedDomains = [],
@@ -19,6 +39,41 @@ class Tool
         return $aResult;
     }
 
+    /**
+     * Fetch of a concrete page by the provider.
+     *
+     * @param array     $aAllowedDomains   Only these domains may be fetched.
+     * @param array     $aBlockedDomains   These domains are excluded.
+     * @param int|null  $iMaxUses          Optional max number of fetches per request.
+     * @param bool|null $bCitations        Optional: include source citations in the answer text.
+     * @param int|null  $iMaxContentTokens Optional cap on the page size read in.
+     * @return array Tool definition of type web_fetch.
+     */
+    public static function webFetch(
+        array $aAllowedDomains = [],
+        array $aBlockedDomains = [],
+        ?int  $iMaxUses = null,
+        ?bool $bCitations = null,
+        ?int  $iMaxContentTokens = null,
+    ): array {
+        $aResult = ['_type' => 'web_fetch'];
+        if (!empty($aAllowedDomains))    $aResult['allowed_domains']    = $aAllowedDomains;
+        if (!empty($aBlockedDomains))    $aResult['blocked_domains']    = $aBlockedDomains;
+        if ($iMaxUses !== null)          $aResult['max_uses']           = $iMaxUses;
+        if ($bCitations !== null)        $aResult['citations']          = $bCitations;
+        if ($iMaxContentTokens !== null) $aResult['max_content_tokens'] = $iMaxContentTokens;
+        return $aResult;
+    }
+
+    /**
+     * Custom function the model can request a call to. The call comes back as
+     * a ChatOutput of type FunctionCall and is answered via Context::tool().
+     *
+     * @param string $sName        Function name the model calls it by.
+     * @param string $sDescription Description of what the function is for.
+     * @param array  $aParameters  JSON schema of the expected parameters.
+     * @return array Tool definition of type function.
+     */
     public static function function(
         string $sName,
         string $sDescription,
@@ -32,6 +87,21 @@ class Tool
         ];
     }
 
+    /**
+     * Image generation inside a text request — the images come back as
+     * ChatOutput of type Image (for pure image requests use the Image endpoint).
+     *
+     * @param string|null $sModel             Optional image model.
+     * @param string|null $sSize              Optional image size (e.g. '1024x1024').
+     * @param string|null $sQuality           Optional quality level.
+     * @param string|null $sBackground        Optional background (e.g. 'transparent').
+     * @param string|null $sModeration        Optional content moderation level.
+     * @param string|null $sInputFidelity     Optional: how closely to follow input images.
+     * @param string|null $sOutputFormat      Optional file format (png, jpeg, webp).
+     * @param int|null    $iOutputCompression Optional compression in percent.
+     * @param int|null    $iPartialImages     Optional number of intermediate images.
+     * @return array Tool definition of type image_generation.
+     */
     public static function imageGeneration(
         ?string $sModel = null,
         ?string $sSize = null,
@@ -56,6 +126,15 @@ class Tool
         return $aResult;
     }
 
+    /**
+     * Connection to an external MCP server whose tools the model may also use.
+     *
+     * @param string $sName            Name the server is addressed by.
+     * @param string $sUrl             Endpoint of the MCP server.
+     * @param string $sRequireApproval Whether calls must be confirmed ('always', 'never').
+     * @param array  $aAllowedTools    Optional restriction to individual server tools.
+     * @return array Tool definition of type mcp.
+     */
     public static function mcp(
         string $sName,
         string $sUrl,
@@ -74,6 +153,16 @@ class Tool
         return $aResult;
     }
 
+    /**
+     * Approximate location for web search so regional results are preferred.
+     * Passed as $aUserLocation to webSearch().
+     *
+     * @param string      $sCountry  Country code (e.g. 'DE').
+     * @param string|null $sCity     Optional city.
+     * @param string|null $sRegion   Optional region / state.
+     * @param string|null $sTimezone Optional timezone (e.g. 'Europe/Berlin').
+     * @return array Location structure for webSearch().
+     */
     public static function location(
         string  $sCountry,
         ?string $sCity = null,

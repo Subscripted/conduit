@@ -2,21 +2,40 @@
 
 namespace entity\core;
 
+/**
+ * Building blocks for the conversation history so far.
+ *
+ * A stateless factory: the static methods return the messages passed to
+ * Chat::context(). This lets the model know what was asked and answered
+ * before — the history must be sent in full with every request, the API
+ * remembers nothing.
+ */
 class Context
 {
+    /**
+     * @param array|string $mContent Content blocks from Content::... or plain text.
+     * @return array Message with role 'user'.
+     */
     public static function user(array|string $mContent): array
     {
         return ['role' => 'user', 'content' => $mContent];
     }
 
+    /**
+     * @param array|string $mContent Content blocks from Content::... or plain text.
+     * @return array Message with role 'assistant'.
+     */
     public static function assistant(array|string $mContent): array
     {
         return ['role' => 'assistant', 'content' => $mContent];
     }
 
     /**
-     * Tool result to send back after a function_call.
-     * $sToolCallId comes from ChatOutput::getCallId().
+     * Result of a function call, sent back after a function_call output.
+     *
+     * @param string       $sToolCallId Call id from ChatOutput::getCallId().
+     * @param string|array $mOutput     Return value of the called function.
+     * @return array Message with role 'tool_result'.
      */
     public static function tool(string $sToolCallId, string|array $mOutput): array
     {
@@ -27,6 +46,14 @@ class Context
         ];
     }
 
+    /**
+     * Turns a mixed list into valid messages: plain strings become user()
+     * messages, ready-made messages are passed through unchanged.
+     *
+     * @param array $aMessages List of strings and/or messages with role and content.
+     * @return array List of valid messages for Chat::context().
+     * @throws \InvalidArgumentException If an entry is neither a string nor a valid message.
+     */
     public static function from(array $aMessages): array
     {
         $aResult = [];
