@@ -22,6 +22,33 @@ class AnthropicAdapter extends AbstractLLMAdapter
     private const string ANTHROPIC_VERSION = '2023-06-01';
 
     /**
+     * Dated `type` tags for the Anthropic-provided server tools
+     * (https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference).
+     *
+     * These versions are capability-keyed, not strict successors: newer dates
+     * add optional features (dynamic content filtering, cache-bypass,
+     * response-inclusion control) while staying schema-compatible for the
+     * fields this adapter sends. We pin the latest of each; older dates
+     * (web_search_20250305, web_fetch_20250910, ...) still work at the API if
+     * a specific model needs them.
+     */
+    private const string WEB_SEARCH_TYPE = 'web_search_20260318';
+    private const string WEB_FETCH_TYPE  = 'web_fetch_20260318';
+
+    /** Beta flag that unlocks the MCP connector (mcp_servers + mcp_toolset). */
+    private const string MCP_BETA = 'mcp-client-2025-11-20';
+
+    /**
+     * anthropic-beta flags the current request needs, e.g. MCP_BETA when it
+     * carries mcp_servers. Set by chat() from the payload, read by headers(),
+     * reset at the start of every chat() call — a beta flag depends on what a
+     * request contains, so it lives here and not in the shared request().
+     *
+     * @var string[]
+     */
+    private array $aRequestBetas = [];
+
+    /**
      * @param string $sApiKey API key of the Anthropic account.
      */
     public function __construct(private readonly string $sApiKey)
@@ -29,16 +56,21 @@ class AnthropicAdapter extends AbstractLLMAdapter
     }
 
     /**
-     * Provider-specific headers for every request.
+     * Provider-specific headers for every request. anthropic-beta is added
+     * only when the current request collected a flag in $aRequestBetas.
      *
      * @return array Header name => value.
      */
     protected function headers(): array
     {
-        return [
+        $aHeaders = [
             'x-api-key' => $this->sApiKey,
             'anthropic-version' => self::ANTHROPIC_VERSION,
         ];
+        if ($this->aRequestBetas !== []) {
+            $aHeaders['anthropic-beta'] = implode(',', $this->aRequestBetas);
+        }
+        return $aHeaders;
     }
 
     /**
@@ -63,6 +95,8 @@ class AnthropicAdapter extends AbstractLLMAdapter
      */
     public function chat(array $aPayload): array
     {
+        $this->aRequestBetas = [];
+
         $aBody = [
             'model' => $aPayload['model'],
             'max_tokens' => $aPayload['maxTokens'] ?? 1024,
@@ -76,6 +110,16 @@ class AnthropicAdapter extends AbstractLLMAdapter
             $aBuiltTools = $this->buildTools($aPayload['tools']);
             if (!empty($aBuiltTools)) {
                 $aBody['tools'] = $aBuiltTools;
+            }
+
+            // An MCP connection is two body parts: the mcp_toolset entry that
+            // buildTools() already put into `tools`, plus these connection
+            // details as a top-level sibling. Presence of a server is what
+            // gates the beta flag.
+            $aMcpServers = $this->buildMcpServers($aPayload['tools']);
+            if (!empty($aMcpServers)) {
+                $aBody['mcp_servers'] = $aMcpServers;
+                $this->aRequestBetas[] = self::MCP_BETA;
             }
         }
         if (!empty($aPayload['jsonSchema'])) {
@@ -110,6 +154,11 @@ class AnthropicAdapter extends AbstractLLMAdapter
         $aMessages = [];
 
         foreach ($aPayload['context'] ?? [] as $aMessage) {
+            // The Anthropic MCP connector runs tool calls without an approval
+            // step — an mcpApproval() answer from an OpenAI turn has no place here.
+            if (($aMessage['role'] ?? '') === 'mcp_approval_response') {
+                continue;
+            }
             $aMessages[] = $this->transformContextMessage($aMessage);
         }
 
@@ -213,11 +262,15 @@ class AnthropicAdapter extends AbstractLLMAdapter
     // ── Tool builder ──────────────────────────────────────────────────────
 
     /**
-     * Translates the neutral tool definitions into the Anthropic format.
-     * The built-in tools carry a dated type tag (e.g. web_search_20250305).
-     * Tools Anthropic does not know (image generation, MCP) are skipped silently.
+     * Translates the neutral tool definitions into the Anthropic format —
+     * everything that belongs in the `tools` array of the request body,
+     * including the `mcp_toolset` half of an MCP connection. The connection
+     * details themselves go into a top-level `mcp_servers` key, built by
+     * buildMcpServers(). The built-in tools carry a dated type tag pinned in
+     * the WEB_SEARCH_TYPE / WEB_FETCH_TYPE constants. image_generation is
+     * skipped silently.
      *
-     * @param array $aTools Tool definitions from Tool::webSearch(), ::webFetch(), ::function().
+     * @param array $aTools Tool definitions from Tool::webSearch(), ::webFetch(), ::function(), ::mcp().
      * @return array Tools in the Anthropic format, empty when none is supported.
      */
     private function buildTools(array $aTools): array
@@ -229,14 +282,14 @@ class AnthropicAdapter extends AbstractLLMAdapter
 
             switch ($sType) {
                 case 'web_search':
-                    $aBuilt = ['type' => 'web_search_20250305', 'name' => 'web_search'];
+                    $aBuilt = ['type' => self::WEB_SEARCH_TYPE, 'name' => 'web_search'];
                     if (!empty($aTool['max_uses']))        $aBuilt['max_uses']        = $aTool['max_uses'];
                     if (!empty($aTool['allowed_domains'])) $aBuilt['allowed_domains'] = $aTool['allowed_domains'];
                     if (!empty($aTool['blocked_domains'])) $aBuilt['blocked_domains'] = $aTool['blocked_domains'];
                     break;
 
                 case 'web_fetch':
-                    $aBuilt = ['type' => 'web_fetch_20250910', 'name' => 'web_fetch'];
+                    $aBuilt = ['type' => self::WEB_FETCH_TYPE, 'name' => 'web_fetch'];
                     if (!empty($aTool['max_uses']))        $aBuilt['max_uses']        = $aTool['max_uses'];
                     if (!empty($aTool['allowed_domains'])) $aBuilt['allowed_domains'] = $aTool['allowed_domains'];
                     if (!empty($aTool['blocked_domains'])) $aBuilt['blocked_domains'] = $aTool['blocked_domains'];
@@ -252,7 +305,27 @@ class AnthropicAdapter extends AbstractLLMAdapter
                     ];
                     break;
 
-                // image_generation and mcp are not supported by Anthropic — skip silently
+                case 'mcp':
+                    // The only entry MCP adds to `tools`: a toolset that points
+                    // at the server declared in `mcp_servers` (buildMcpServers()).
+                    // Skip it when the server can't be built, so the reference
+                    // never dangles. Anthropic's connector has no approval step
+                    // and takes no custom headers / description / connector id —
+                    // those neutral fields are ignored. allowed_tools becomes an
+                    // allowlist: everything off by default, listed tools back on.
+                    if (empty($aTool['url'])) {
+                        break;
+                    }
+                    $aBuilt = ['type' => 'mcp_toolset', 'mcp_server_name' => $aTool['name']];
+                    if (!empty($aTool['allowed_tools'])) {
+                        $aBuilt['default_config'] = ['enabled' => false];
+                        foreach ($aTool['allowed_tools'] as $sToolName) {
+                            $aBuilt['configs'][$sToolName] = ['enabled' => true];
+                        }
+                    }
+                    break;
+
+                // image_generation is not supported by Anthropic — skip silently
             }
 
             if ($aBuilt !== null) {
@@ -260,6 +333,35 @@ class AnthropicAdapter extends AbstractLLMAdapter
             }
         }
         return $aResult;
+    }
+
+    /**
+     * Builds the top-level `mcp_servers` array — the connection half of the
+     * MCP connector (URL + OAuth token). The `tools` half (one mcp_toolset
+     * per server) is built by buildTools(); both skip a server without a URL
+     * on the same condition, so a toolset never references a missing server.
+     *
+     * @param array $aTools All neutral tool definitions of the request.
+     * @return array `mcp_servers` entries, empty when no usable MCP tool is present.
+     */
+    private function buildMcpServers(array $aTools): array
+    {
+        $aServers = [];
+        foreach ($aTools as $aTool) {
+            if (($aTool['_type'] ?? '') !== 'mcp' || empty($aTool['url'])) {
+                continue;
+            }
+            $aServer = [
+                'type' => 'url',
+                'url'  => $aTool['url'],
+                'name' => $aTool['name'],
+            ];
+            if (!empty($aTool['authorization_token'])) {
+                $aServer['authorization_token'] = $aTool['authorization_token'];
+            }
+            $aServers[] = $aServer;
+        }
+        return $aServers;
     }
 
     // ── Response normalizer ───────────────────────────────────────────────
@@ -314,6 +416,25 @@ class AnthropicAdapter extends AbstractLLMAdapter
                     }
                     break;
 
+                case 'mcp_tool_use':
+                    $aOutputs[] = [
+                        'type'         => 'mcp_call',
+                        'name'         => $aBlock['name'] ?? '',
+                        'server_label' => $aBlock['server_name'] ?? '',
+                        'call_id'      => $aBlock['id'] ?? '',
+                        'arguments'    => json_encode($aBlock['input'] ?? []),
+                    ];
+                    break;
+
+                case 'mcp_tool_result':
+                    $aOutputs[] = [
+                        'type'       => 'mcp_result',
+                        'call_id'    => $aBlock['tool_use_id'] ?? '',
+                        'mcp_error'  => (bool)($aBlock['is_error'] ?? false),
+                        'mcp_output' => $this->flattenMcpResultContent($aBlock['content'] ?? []),
+                    ];
+                    break;
+
                 case 'thinking':
                     $aOutputs[] = ['type' => 'thinking', 'thinking' => $aBlock['thinking'] ?? ''];
                     break;
@@ -327,6 +448,25 @@ class AnthropicAdapter extends AbstractLLMAdapter
             'outputs' => $aOutputs,
             'errors' => [],
         ];
+    }
+
+    /**
+     * Reduces the content of an mcp_tool_result — a list of text blocks — to a
+     * single string. A plain string content (older shape) is returned as is.
+     *
+     * @param array|string $mContent Content of an mcp_tool_result block.
+     * @return string Joined text of the result.
+     */
+    private function flattenMcpResultContent(array|string $mContent): string
+    {
+        if (is_string($mContent)) {
+            return $mContent;
+        }
+        $sText = '';
+        foreach ($mContent as $aPart) {
+            $sText .= $aPart['text'] ?? '';
+        }
+        return $sText;
     }
 
     /**

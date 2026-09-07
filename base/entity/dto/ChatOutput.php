@@ -10,7 +10,8 @@ use type\OutputType;
  * A single output block of a text response.
  *
  * A response is not one text but a sequence of blocks: text, a call to a
- * custom function, web search, web fetch, image, refusal or thinking. This
+ * custom function, web search, web fetch, image, refusal, thinking or an MCP
+ * server interaction (call, result, tool listing, approval request). This
  * class represents one such block; which fields are filled depends on the
  * type — check the type before every getter.
  */
@@ -29,6 +30,11 @@ class ChatOutput implements Output
 
     private string $sRefusal  = '';
     private string $sThinking = '';
+
+    private string $sServerLabel = '';
+    private string $sMcpOutput   = '';
+    private bool   $bMcpError    = false;
+    private array  $aMcpTools    = [];
 
     // ── Getters ───────────────────────────────────────────────────────────
 
@@ -59,6 +65,18 @@ class ChatOutput implements Output
     /** @return string Summary of the reasoning, if requested via effort(..., true). */
     public function getThinking(): string    { return $this->sThinking; }
 
+    /** @return string Name of the MCP server the block belongs to (its server_label). */
+    public function getServerLabel(): string { return $this->sServerLabel; }
+
+    /** @return string Result the MCP server returned (McpResult), or the error text when isMcpError(). */
+    public function getMcpOutput(): string   { return $this->sMcpOutput; }
+
+    /** @return bool True when the MCP tool call ended in an error (McpResult only). */
+    public function isMcpError(): bool       { return $this->bMcpError; }
+
+    /** @return string[] Names of the tools an MCP server exposes (McpListTools only). */
+    public function getMcpTools(): array     { return $this->aMcpTools; }
+
     // ── Type checks ───────────────────────────────────────────────────────
 
     /** @return bool True when this block is plain text. */
@@ -82,6 +100,18 @@ class ChatOutput implements Output
     /** @return bool True when this block carries a thinking summary. */
     public function isThinking(): bool     { return $this->oType === OutputType::Thinking; }
 
+    /** @return bool True when the model called a tool on a connected MCP server. */
+    public function isMcpCall(): bool            { return $this->oType === OutputType::McpCall; }
+
+    /** @return bool True when this block carries the result of an MCP tool call. */
+    public function isMcpResult(): bool          { return $this->oType === OutputType::McpResult; }
+
+    /** @return bool True when this block lists the tools a connected MCP server exposes. */
+    public function isMcpListTools(): bool       { return $this->oType === OutputType::McpListTools; }
+
+    /** @return bool True when an MCP tool call needs confirmation before it runs. */
+    public function isMcpApprovalRequest(): bool { return $this->oType === OutputType::McpApprovalRequest; }
+
     // ── Hydration ─────────────────────────────────────────────────────────
 
     /**
@@ -103,6 +133,10 @@ class ChatOutput implements Output
         $oInstance->hydrateImageData($aData);
         $oInstance->sRefusal     = $aData['refusal'] ?? '';
         $oInstance->sThinking    = $aData['thinking'] ?? '';
+        $oInstance->sServerLabel = $aData['server_label'] ?? '';
+        $oInstance->sMcpOutput   = $aData['mcp_output'] ?? '';
+        $oInstance->bMcpError    = (bool)($aData['mcp_error'] ?? false);
+        $oInstance->aMcpTools    = $aData['mcp_tools'] ?? [];
         return $oInstance;
     }
 
@@ -122,8 +156,12 @@ class ChatOutput implements Output
         if ($this->sCallId !== '')      $aResult['call_id']     = $this->sCallId;
         if ($this->sArguments !== '')   $aResult['arguments']   = $this->sArguments;
         $aResult = array_merge($aResult, $this->toArrayImageData());
-        if ($this->sRefusal !== '')     $aResult['refusal']     = $this->sRefusal;
-        if ($this->sThinking !== '')    $aResult['thinking']    = $this->sThinking;
+        if ($this->sRefusal !== '')     $aResult['refusal']      = $this->sRefusal;
+        if ($this->sThinking !== '')    $aResult['thinking']     = $this->sThinking;
+        if ($this->sServerLabel !== '') $aResult['server_label'] = $this->sServerLabel;
+        if ($this->sMcpOutput !== '')   $aResult['mcp_output']   = $this->sMcpOutput;
+        if ($this->bMcpError)           $aResult['mcp_error']    = true;
+        if ($this->aMcpTools !== [])    $aResult['mcp_tools']    = $this->aMcpTools;
         return $aResult;
     }
 
@@ -133,10 +171,11 @@ class ChatOutput implements Output
     public function __toString(): string
     {
         return match ($this->oType) {
-            OutputType::Text     => $this->sText,
-            OutputType::Refusal  => $this->sRefusal,
-            OutputType::Thinking => $this->sThinking,
-            default              => '',
+            OutputType::Text      => $this->sText,
+            OutputType::Refusal   => $this->sRefusal,
+            OutputType::Thinking  => $this->sThinking,
+            OutputType::McpResult => $this->sMcpOutput,
+            default               => '',
         };
     }
 }

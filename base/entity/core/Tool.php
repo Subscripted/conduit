@@ -127,19 +127,40 @@ class Tool
     }
 
     /**
-     * Connection to an external MCP server whose tools the model may also use.
+     * Connection to a remote MCP server whose tools the model may also use.
      *
-     * @param string $sName            Name the server is addressed by.
-     * @param string $sUrl             Endpoint of the MCP server.
-     * @param string $sRequireApproval Whether calls must be confirmed ('always', 'never').
-     * @param array  $aAllowedTools    Optional restriction to individual server tools.
+     * Both providers run the server call themselves and feed the result back
+     * into the same turn — the tool call and its result arrive as McpCall /
+     * McpResult output blocks, no round trip via Context::tool() is needed.
+     *
+     * The neutral definition carries the union of what both providers accept;
+     * each adapter uses only the fields its API knows:
+     *   - Anthropic (Messages API, beta mcp-client-2025-11-20): name, url,
+     *     authorization_token, allowed_tools (as an allowlist). It has no
+     *     approval step, so require_approval / headers / description /
+     *     connector_id are ignored.
+     *   - OpenAI (Responses API): every field. allowed_tools and
+     *     require_approval also accept their object forms unchanged.
+     *
+     * @param string      $sName               Name / server_label the server is addressed by.
+     * @param string      $sUrl                 HTTPS endpoint of the MCP server. May be '' when $sConnectorId is set (OpenAI).
+     * @param string      $sRequireApproval    Whether calls must be confirmed ('always', 'never'); OpenAI only.
+     * @param array       $aAllowedTools       Optional restriction to individual server tools.
+     * @param string|null $sAuthorizationToken Optional OAuth bearer token for authenticated servers.
+     * @param array       $aHeaders            Optional extra HTTP headers sent to the server; OpenAI only.
+     * @param string|null $sDescription        Optional hint describing the server's capabilities; OpenAI only.
+     * @param string|null $sConnectorId        Optional OpenAI built-in connector id (e.g. 'connector_dropbox'); OpenAI only.
      * @return array Tool definition of type mcp.
      */
     public static function mcp(
-        string $sName,
-        string $sUrl,
-        string $sRequireApproval = 'always',
-        array  $aAllowedTools = [],
+        string  $sName,
+        string  $sUrl,
+        string  $sRequireApproval = 'always',
+        array   $aAllowedTools = [],
+        ?string $sAuthorizationToken = null,
+        array   $aHeaders = [],
+        ?string $sDescription = null,
+        ?string $sConnectorId = null,
     ): array {
         $aResult = [
             '_type'            => 'mcp',
@@ -147,9 +168,11 @@ class Tool
             'url'              => $sUrl,
             'require_approval' => $sRequireApproval,
         ];
-        if (!empty($aAllowedTools)) {
-            $aResult['allowed_tools'] = $aAllowedTools;
-        }
+        if (!empty($aAllowedTools))            $aResult['allowed_tools']       = $aAllowedTools;
+        if ($sAuthorizationToken !== null)     $aResult['authorization_token'] = $sAuthorizationToken;
+        if (!empty($aHeaders))                 $aResult['headers']             = $aHeaders;
+        if ($sDescription !== null)            $aResult['description']         = $sDescription;
+        if ($sConnectorId !== null)            $aResult['connector_id']        = $sConnectorId;
         return $aResult;
     }
 

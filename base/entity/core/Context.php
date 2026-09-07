@@ -47,6 +47,24 @@ class Context
     }
 
     /**
+     * Answer to an MCP tool call the model wants confirmed (require_approval
+     * 'always'). Sent back after an McpApprovalRequest output block. OpenAI
+     * only — the Anthropic MCP connector has no approval step and drops it.
+     *
+     * @param string $sApprovalRequestId Id from ChatOutput::getCallId() of the approval request.
+     * @param bool   $bApprove           True to let the call run, false to decline it.
+     * @return array Message with role 'mcp_approval_response'.
+     */
+    public static function mcpApproval(string $sApprovalRequestId, bool $bApprove): array
+    {
+        return [
+            'role'                => 'mcp_approval_response',
+            'approval_request_id' => $sApprovalRequestId,
+            'approve'             => $bApprove,
+        ];
+    }
+
+    /**
      * Turns a mixed list into valid messages: plain strings become user()
      * messages, ready-made messages are passed through unchanged.
      *
@@ -62,7 +80,11 @@ class Context
                 $aResult[] = self::user($mMessage);
                 continue;
             }
-            if (is_array($mMessage) && isset($mMessage['role'], $mMessage['content'])) {
+            // Normal messages carry role + content; control messages such as
+            // mcpApproval() carry a role but no content — accept both.
+            if (is_array($mMessage) && isset($mMessage['role'])
+                && (isset($mMessage['content']) || str_starts_with($mMessage['role'], 'mcp_'))
+            ) {
                 $aResult[] = $mMessage;
                 continue;
             }

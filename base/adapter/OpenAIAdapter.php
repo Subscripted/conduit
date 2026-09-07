@@ -146,6 +146,14 @@ class OpenAIAdapter extends AbstractLLMAdapter
             ];
         }
 
+        if ($aMessage['role'] === 'mcp_approval_response') {
+            return [
+                'type'                => 'mcp_approval_response',
+                'approval_request_id' => $aMessage['approval_request_id'],
+                'approve'             => (bool) $aMessage['approve'],
+            ];
+        }
+
         $mContent = $aMessage['content'];
         return [
             'role'    => $aMessage['role'],
@@ -270,10 +278,19 @@ class OpenAIAdapter extends AbstractLLMAdapter
                     $aBuilt = [
                         'type'             => 'mcp',
                         'server_label'     => $aTool['name'],
-                        'server_url'       => $aTool['url'],
                         'require_approval' => $aTool['require_approval'] ?? 'always',
                     ];
-                    if (!empty($aTool['allowed_tools'])) $aBuilt['allowed_tools'] = $aTool['allowed_tools'];
+                    // server_url and connector_id are mutually exclusive — a
+                    // built-in connector carries no URL.
+                    if (!empty($aTool['connector_id'])) {
+                        $aBuilt['connector_id'] = $aTool['connector_id'];
+                    } elseif (!empty($aTool['url'])) {
+                        $aBuilt['server_url'] = $aTool['url'];
+                    }
+                    if (!empty($aTool['description']))         $aBuilt['server_description'] = $aTool['description'];
+                    if (!empty($aTool['authorization_token'])) $aBuilt['authorization']     = $aTool['authorization_token'];
+                    if (!empty($aTool['headers']))             $aBuilt['headers']           = $aTool['headers'];
+                    if (!empty($aTool['allowed_tools']))       $aBuilt['allowed_tools']     = $aTool['allowed_tools'];
                     break;
             }
 
@@ -320,6 +337,47 @@ class OpenAIAdapter extends AbstractLLMAdapter
                     $aOutputs[] = [
                         'type'   => 'web_search',
                         'status' => $aItem['status'] ?? 'completed',
+                    ];
+                    break;
+
+                case 'mcp_call':
+                    $aOutputs[] = [
+                        'type'         => 'mcp_call',
+                        'name'         => $aItem['name'] ?? '',
+                        'server_label' => $aItem['server_label'] ?? '',
+                        'call_id'      => $aItem['id'] ?? '',
+                        'arguments'    => $aItem['arguments'] ?? '{}',
+                    ];
+                    // OpenAI bundles the result into the same item; split it
+                    // off into its own block so it reads the same as Anthropic.
+                    if (isset($aItem['output']) || !empty($aItem['error'])) {
+                        $aOutputs[] = [
+                            'type'       => 'mcp_result',
+                            'call_id'    => $aItem['id'] ?? '',
+                            'mcp_error'  => !empty($aItem['error']),
+                            'mcp_output' => $aItem['error'] ?? (string) ($aItem['output'] ?? ''),
+                        ];
+                    }
+                    break;
+
+                case 'mcp_list_tools':
+                    $aOutputs[] = [
+                        'type'         => 'mcp_list_tools',
+                        'server_label' => $aItem['server_label'] ?? '',
+                        'mcp_tools'    => array_map(
+                            static fn (array $aTool): string => $aTool['name'] ?? '',
+                            $aItem['tools'] ?? [],
+                        ),
+                    ];
+                    break;
+
+                case 'mcp_approval_request':
+                    $aOutputs[] = [
+                        'type'         => 'mcp_approval_request',
+                        'name'         => $aItem['name'] ?? '',
+                        'server_label' => $aItem['server_label'] ?? '',
+                        'call_id'      => $aItem['id'] ?? '',
+                        'arguments'    => $aItem['arguments'] ?? '{}',
                     ];
                     break;
 

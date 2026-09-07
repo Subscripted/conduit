@@ -11,11 +11,15 @@ namespace type;
  */
 enum OutputType: string
 {
-    case Text         = 'text';
-    case FunctionCall = 'function_call';
-    case WebSearch    = 'web_search';
-    case WebFetch     = 'web_fetch';
-    case Image        = 'image';
-    case Refusal      = 'refusal';
-    case Thinking     = 'thinking';
+    case Text               = 'text';
+    case FunctionCall       = 'function_call';
+    case WebSearch          = 'web_search';
+    case WebFetch           = 'web_fetch';
+    case Image              = 'image';
+    case Refusal            = 'refusal';
+    case Thinking           = 'thinking';
+    case McpCall            = 'mcp_call';
+    case McpResult          = 'mcp_result';
+    case McpListTools       = 'mcp_list_tools';
+    case McpApprovalRequest = 'mcp_approval_request';
 }

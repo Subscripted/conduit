@@ -73,6 +73,39 @@ class ChatResponse extends AbstractAIResponse
     }
 
     /**
+     * Tool calls the model made against connected MCP servers (Tool::mcp()).
+     *
+     * @return ChatOutput[]
+     */
+    public function getMcpCalls(): array
+    {
+        $aResult = [];
+        foreach ($this->aOutputs as $oOutput) {
+            if ($oOutput instanceof ChatOutput && $oOutput->isMcpCall()) {
+                $aResult[] = $oOutput;
+            }
+        }
+        return $aResult;
+    }
+
+    /**
+     * Results the connected MCP servers returned for those calls. Match them
+     * to a call via getCallId(); check isMcpError() before trusting the output.
+     *
+     * @return ChatOutput[]
+     */
+    public function getMcpResults(): array
+    {
+        $aResult = [];
+        foreach ($this->aOutputs as $oOutput) {
+            if ($oOutput instanceof ChatOutput && $oOutput->isMcpResult()) {
+                $aResult[] = $oOutput;
+            }
+        }
+        return $aResult;
+    }
+
+    /**
      * Images produced via the image_generation tool inside the chat.
      *
      * @return ChatOutput[]
