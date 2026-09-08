@@ -135,6 +135,37 @@ $client->chat()
 All tool definitions come from the `Conduit\Entity\Tool` factory. The neutral
 `_type` key (a `Conduit\Enum\ToolType` value) is what each adapter switches on.
 
+### Provider support
+
+**Tools** (`Conduit\Entity\Tool`):
+
+| `Tool::` factory     | OpenAI | Anthropic | Notes |
+| -------------------- | :----: | :-------: | ----- |
+| `function()`         |   ✅   |    ✅     | custom function calling |
+| `webSearch()`        |   ✅   |    ✅     | `user_location` (from `location()`) is applied by OpenAI only |
+| `webFetch()`         |   ❌   |    ✅     | OpenAI folds page fetching into `webSearch()` |
+| `imageGeneration()`  |   ✅   |    ❌     | Anthropic has no image capability |
+| `mcp()`              |   ✅   |    ✅     | Anthropic ignores `sRequireApproval`, `aHeaders`, `sDescription`, `sConnectorId` |
+
+**Request features:**
+
+| Feature | OpenAI | Anthropic | Notes |
+| --- | :---: | :---: | --- |
+| `chat()` | ✅ | ✅ | |
+| `image()` endpoint | ✅ | ❌ | Anthropic returns an error response (`UnsupportedCapabilityException`) |
+| `instruction()`, `context()`, `content()` | ✅ | ✅ | |
+| image / file (PDF) input via `Content::` | ✅ | ✅ | |
+| `effort()` + thinking summary | ✅ | ✅ | |
+| function-call round-trip (`Context::tool()`) | ✅ | ✅ | |
+| retry + backoff on `429` / `5xx` | ✅ | ✅ | shared in `AbstractLLMAdapter` |
+| `jsonSchema()` structured output | ❌ | ✅ | not yet wired in the OpenAI adapter — the schema is dropped |
+| `user()` role override | ✅ | ❌ | Anthropic always sends the turn as `user` |
+| `Context::mcpApproval()` | ✅ | ❌ | Anthropic's MCP connector has no approval step |
+
+A tool or field the active provider doesn't support is **dropped silently** — the
+request still runs, it just isn't sent. The `image()` endpoint is the one
+exception: on Anthropic it returns an error response, it is not ignored.
+
 ### Custom functions
 
 ```php
