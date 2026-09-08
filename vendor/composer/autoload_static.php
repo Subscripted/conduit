@@ -6,40 +6,62 @@ namespace Composer\Autoload;
 
 class ComposerStaticInitd751713988987e9331980363e24189ce
 {
+    public static $prefixLengthsPsr4 = array (
+        'C' =>
+        array (
+            'Conduit\\' => 8,
+        ),
+    );
+
+    public static $prefixDirsPsr4 = array (
+        'Conduit\\' =>
+        array (
+            0 => __DIR__ . '/../..' . '/src',
+        ),
+    );
+
     public static $classMap = array (
-        'AbstractAIResponse' => __DIR__ . '/../..' . '/abstract/AbstractAIResponse.php',
-        'AbstractLLMAdapter' => __DIR__ . '/../..' . '/abstract/AbstractLLMAdapter.php',
-        'AbstractLLMEndpoint' => __DIR__ . '/../..' . '/abstract/AbstractLLMEndpoint.php',
-        'Castable' => __DIR__ . '/../..' . '/abstract/interface/Castable.php',
         'Composer\\InstalledVersions' => __DIR__ . '/..' . '/composer/InstalledVersions.php',
-        'ErrorCollectionInterface' => __DIR__ . '/../..' . '/abstract/interface/ErrorCollectionInterface.php',
-        'Hydratable' => __DIR__ . '/../..' . '/abstract/interface/Hydratable.php',
-        'LLMAdapter' => __DIR__ . '/../..' . '/abstract/interface/LLMAdapter.php',
-        'Output' => __DIR__ . '/../..' . '/abstract/interface/Output.php',
-        'adapter\\AnthropicAdapter' => __DIR__ . '/../..' . '/base/adapter/AnthropicAdapter.php',
-        'adapter\\OpenAIAdapter' => __DIR__ . '/../..' . '/base/adapter/OpenAIAdapter.php',
-        'client\\LLMClient' => __DIR__ . '/../..' . '/base/client/LLMClient.php',
-        'endpoint\\Chat' => __DIR__ . '/../..' . '/base/endpoint/Chat.php',
-        'endpoint\\Image' => __DIR__ . '/../..' . '/base/endpoint/Image.php',
-        'entity\\core\\Content' => __DIR__ . '/../..' . '/base/entity/core/Content.php',
-        'entity\\core\\Context' => __DIR__ . '/../..' . '/base/entity/core/Context.php',
-        'entity\\core\\Tool' => __DIR__ . '/../..' . '/base/entity/core/Tool.php',
-        'entity\\dto\\ChatOutput' => __DIR__ . '/../..' . '/base/entity/dto/ChatOutput.php',
-        'entity\\dto\\ChatResponse' => __DIR__ . '/../..' . '/base/entity/dto/ChatResponse.php',
-        'entity\\dto\\ImageOutput' => __DIR__ . '/../..' . '/base/entity/dto/ImageOutput.php',
-        'entity\\dto\\ImageResponse' => __DIR__ . '/../..' . '/base/entity/dto/ImageResponse.php',
-        'factory\\AdapterFactory' => __DIR__ . '/../..' . '/base/factory/AdapterFactory.php',
-        'traits\\HasErrors' => __DIR__ . '/../..' . '/base/traits/HasErrors.php',
-        'traits\\HasImageData' => __DIR__ . '/../..' . '/base/traits/HasImageData.php',
-        'traits\\HasTools' => __DIR__ . '/../..' . '/base/traits/HasTools.php',
-        'type\\AIProvider' => __DIR__ . '/../..' . '/base/typ/AIProvider.php',
-        'type\\OutputType' => __DIR__ . '/../..' . '/base/typ/OutputType.php',
-        'type\\ThinkingEffort' => __DIR__ . '/../..' . '/base/typ/ThinkingEffort.php',
+        'Conduit\\Adapter\\AbstractLLMAdapter' => __DIR__ . '/../..' . '/src/Adapter/AbstractLLMAdapter.php',
+        'Conduit\\Adapter\\AnthropicAdapter' => __DIR__ . '/../..' . '/src/Adapter/AnthropicAdapter.php',
+        'Conduit\\Adapter\\OpenAIAdapter' => __DIR__ . '/../..' . '/src/Adapter/OpenAIAdapter.php',
+        'Conduit\\Client\\LLMClient' => __DIR__ . '/../..' . '/src/Client/LLMClient.php',
+        'Conduit\\Contract\\Castable' => __DIR__ . '/../..' . '/src/Contract/Castable.php',
+        'Conduit\\Contract\\ErrorCollectionInterface' => __DIR__ . '/../..' . '/src/Contract/ErrorCollectionInterface.php',
+        'Conduit\\Contract\\Hydratable' => __DIR__ . '/../..' . '/src/Contract/Hydratable.php',
+        'Conduit\\Contract\\LLMAdapter' => __DIR__ . '/../..' . '/src/Contract/LLMAdapter.php',
+        'Conduit\\Contract\\Output' => __DIR__ . '/../..' . '/src/Contract/Output.php',
+        'Conduit\\Endpoint\\AbstractLLMEndpoint' => __DIR__ . '/../..' . '/src/Endpoint/AbstractLLMEndpoint.php',
+        'Conduit\\Endpoint\\Chat' => __DIR__ . '/../..' . '/src/Endpoint/Chat.php',
+        'Conduit\\Endpoint\\Image' => __DIR__ . '/../..' . '/src/Endpoint/Image.php',
+        'Conduit\\Entity\\Content' => __DIR__ . '/../..' . '/src/Entity/Content.php',
+        'Conduit\\Entity\\Context' => __DIR__ . '/../..' . '/src/Entity/Context.php',
+        'Conduit\\Entity\\Tool' => __DIR__ . '/../..' . '/src/Entity/Tool.php',
+        'Conduit\\Enum\\AIProvider' => __DIR__ . '/../..' . '/src/Enum/AIProvider.php',
+        'Conduit\\Enum\\OutputType' => __DIR__ . '/../..' . '/src/Enum/OutputType.php',
+        'Conduit\\Enum\\ThinkingEffort' => __DIR__ . '/../..' . '/src/Enum/ThinkingEffort.php',
+        'Conduit\\Enum\\ToolType' => __DIR__ . '/../..' . '/src/Enum/ToolType.php',
+        'Conduit\\Exception\\ApiException' => __DIR__ . '/../..' . '/src/Exception/ApiException.php',
+        'Conduit\\Exception\\ConduitException' => __DIR__ . '/../..' . '/src/Exception/ConduitException.php',
+        'Conduit\\Exception\\ConfigurationException' => __DIR__ . '/../..' . '/src/Exception/ConfigurationException.php',
+        'Conduit\\Exception\\TransportException' => __DIR__ . '/../..' . '/src/Exception/TransportException.php',
+        'Conduit\\Exception\\UnsupportedCapabilityException' => __DIR__ . '/../..' . '/src/Exception/UnsupportedCapabilityException.php',
+        'Conduit\\Factory\\AdapterFactory' => __DIR__ . '/../..' . '/src/Factory/AdapterFactory.php',
+        'Conduit\\Response\\AbstractAIResponse' => __DIR__ . '/../..' . '/src/Response/AbstractAIResponse.php',
+        'Conduit\\Response\\ChatOutput' => __DIR__ . '/../..' . '/src/Response/ChatOutput.php',
+        'Conduit\\Response\\ChatResponse' => __DIR__ . '/../..' . '/src/Response/ChatResponse.php',
+        'Conduit\\Response\\ImageOutput' => __DIR__ . '/../..' . '/src/Response/ImageOutput.php',
+        'Conduit\\Response\\ImageResponse' => __DIR__ . '/../..' . '/src/Response/ImageResponse.php',
+        'Conduit\\Support\\HasErrors' => __DIR__ . '/../..' . '/src/Support/HasErrors.php',
+        'Conduit\\Support\\HasImageData' => __DIR__ . '/../..' . '/src/Support/HasImageData.php',
+        'Conduit\\Support\\HasTools' => __DIR__ . '/../..' . '/src/Support/HasTools.php',
     );
 
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
+            $loader->prefixLengthsPsr4 = ComposerStaticInitd751713988987e9331980363e24189ce::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInitd751713988987e9331980363e24189ce::$prefixDirsPsr4;
             $loader->classMap = ComposerStaticInitd751713988987e9331980363e24189ce::$classMap;
 
         }, null, ClassLoader::class);

@@ -1,11 +1,15 @@
 {
+  "name": "conduit",
+  "description": "Multi-provider LLM SDK for PHP: one neutral request shape, provider adapters for OpenAI and Anthropic.",
+  "type": "library",
+  "license": "MIT",
   "require": {
+    "php": ">=8.4",
     "ext-curl": "*"
   },
   "autoload": {
-    "classmap": [
-      "abstract/",
-      "base/"
-    ]
+    "psr-4": {
+      "Conduit\\": "src/"
+    }
   }
 }
