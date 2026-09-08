@@ -46,8 +46,11 @@ class ImageResponse extends AbstractAIResponse
     /** @return string URL of the first image, empty when the provider only returned base64 data. */
     public function getImageUrl(): string    { return $this->getImage()?->getImageUrl() ?? ''; }
 
-    /** @return string Dimensions of the first image, empty when there is none. */
-    public function getSize(): string        { return $this->getImage()?->getSize() ?? ''; }
+    /** @return int Width of the first image in pixels, 0 when there is none. */
+    public function getWidth(): int          { return $this->getImage()?->getWidth() ?? 0; }
+
+    /** @return int Height of the first image in pixels, 0 when there is none. */
+    public function getHeight(): int         { return $this->getImage()?->getHeight() ?? 0; }
 
     // ── Hydration ─────────────────────────────────────────────────────────
 

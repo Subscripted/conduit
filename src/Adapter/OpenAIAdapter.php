@@ -77,7 +77,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * because the endpoint also works without input images and thus covers
      * both cases. For pure text-to-image requests, switch to /images/generations.
      *
-     * @param array $aPayload Neutral payload: model, prompt, images, size, quality, outputFormat.
+     * @param array $aPayload Neutral payload: model, prompt, images, width, height, quality, outputFormat.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
      * @throws \Conduit\Exception\TransportException|\Conduit\Exception\ApiException If the HTTP request or the API fails.
      */
@@ -92,7 +92,8 @@ class OpenAIAdapter extends AbstractLLMAdapter
             $aBody['images'][] = ['image_url' => $sUrl];
         }
 
-        if (!empty($aPayload['size']))         $aBody['size']          = $aPayload['size'];
+        $sSize = $this->sizeToString((int) ($aPayload['width'] ?? 0), (int) ($aPayload['height'] ?? 0));
+        if ($sSize !== null)                   $aBody['size']          = $sSize;
         if (!empty($aPayload['quality']))      $aBody['quality']       = $aPayload['quality'];
         if (!empty($aPayload['outputFormat'])) $aBody['output_format'] = $aPayload['outputFormat'];
 
@@ -264,7 +265,8 @@ class OpenAIAdapter extends AbstractLLMAdapter
                 case ToolType::ImageGeneration->value:
                     $aBuilt = ['type' => 'image_generation'];
                     if (!empty($aTool['model']))              $aBuilt['model']              = $aTool['model'];
-                    if (!empty($aTool['size']))               $aBuilt['size']               = $aTool['size'];
+                    $sImgSize = $this->sizeToString((int) ($aTool['width'] ?? 0), (int) ($aTool['height'] ?? 0));
+                    if ($sImgSize !== null)                   $aBuilt['size']               = $sImgSize;
                     if (!empty($aTool['quality']))            $aBuilt['quality']            = $aTool['quality'];
                     if (!empty($aTool['background']))         $aBuilt['background']         = $aTool['background'];
                     if (!empty($aTool['moderation']))         $aBuilt['moderation']         = $aTool['moderation'];
@@ -490,6 +492,34 @@ class OpenAIAdapter extends AbstractLLMAdapter
     }
 
     /**
+     * Joins a neutral width/height pair into the "WxH" string the OpenAI
+     * image endpoints expect. Returns null unless both are positive.
+     *
+     * @param int $iWidth  Width in pixels.
+     * @param int $iHeight Height in pixels.
+     * @return string|null "1024x1024" style string, or null.
+     */
+    private function sizeToString(int $iWidth, int $iHeight): ?string
+    {
+        return ($iWidth > 0 && $iHeight > 0) ? $iWidth . 'x' . $iHeight : null;
+    }
+
+    /**
+     * Splits a provider "WxH" size string into a width/height pair. Returns []
+     * when the string isn't parseable.
+     *
+     * @param string $sSize "1024x1024" style string.
+     * @return array{width:int,height:int}|array{}
+     */
+    private function parseSize(string $sSize): array
+    {
+        if (preg_match('/^(\d+)\s*x\s*(\d+)$/i', trim($sSize), $aMatch) !== 1) {
+            return [];
+        }
+        return ['width' => (int) $aMatch[1], 'height' => (int) $aMatch[2]];
+    }
+
+    /**
      * Translates the raw Images API answer into the neutral format for
      * ImageResponse.
      *
@@ -498,12 +528,15 @@ class OpenAIAdapter extends AbstractLLMAdapter
      */
     private function normalizeImageResponse(array $aRaw): array
     {
+        $aDimensions = $this->parseSize($aRaw['size'] ?? '');
+
         $aOutputs = [];
         foreach ($aRaw['data'] ?? [] as $aItem) {
             $aOutputs[] = [
                 'image_data'   => $aItem['b64_json'] ?? '',
                 'image_format' => $aRaw['output_format'] ?? 'png',
-                'size'         => $aRaw['size'] ?? '',
+                'width'        => $aDimensions['width'] ?? 0,
+                'height'       => $aDimensions['height'] ?? 0,
             ];
         }
 

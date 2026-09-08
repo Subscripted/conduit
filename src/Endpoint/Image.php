@@ -23,7 +23,8 @@ class Image extends AbstractLLMEndpoint
 {
     private string $sPrompt       = '';
     private array  $aImages       = [];
-    private string $sSize         = '';
+    private int    $iWidth        = 0;
+    private int    $iHeight       = 0;
     private string $sQuality      = '';
     private string $sOutputFormat = '';
 
@@ -48,7 +49,8 @@ class Image extends AbstractLLMEndpoint
                 'model'        => $this->sModel,
                 'prompt'       => $this->sPrompt,
                 'images'       => $this->aImages,
-                'size'         => $this->sSize,
+                'width'        => $this->iWidth,
+                'height'       => $this->iHeight,
                 'quality'      => $this->sQuality,
                 'outputFormat' => $this->sOutputFormat,
             ]);
@@ -84,14 +86,16 @@ class Image extends AbstractLLMEndpoint
     }
 
     /**
-     * Sets the image size. Without it the provider uses its default.
+     * Sets the image size in pixels. Without it the provider uses its default.
      *
-     * @param string $sSize Size as edge dimensions, e.g. '1024x1024'.
+     * @param int $iWidth  Width in pixels.
+     * @param int $iHeight Height in pixels.
      * @return self
      */
-    public function size(string $sSize): self
+    public function size(int $iWidth, int $iHeight): self
     {
-        $this->sSize = $sSize;
+        $this->iWidth  = $iWidth;
+        $this->iHeight = $iHeight;
         return $this;
     }
 

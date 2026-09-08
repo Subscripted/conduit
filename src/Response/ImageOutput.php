@@ -10,7 +10,7 @@ use Conduit\Support\HasImageData;
  *
  * Built by ImageResponse from the normalized adapter array. The actual image
  * fields (data, format, url, status) come from the HasImageData trait, only
- * the size is added here.
+ * the width and height are added here.
  *
  * Depending on the provider either image_data (base64) or image_url is
  * filled — both at once is not guaranteed.
@@ -19,37 +19,41 @@ class ImageOutput implements Output
 {
     use HasImageData;
 
-    private string $sSize = '';
+    private int $iWidth  = 0;
+    private int $iHeight = 0;
 
-    /** @return string Dimensions of the image (e.g. '1024x1024'), empty when not delivered. */
-    public function getSize(): string { return $this->sSize; }
+    /** @return int Width in pixels, 0 when not delivered. */
+    public function getWidth(): int { return $this->iWidth; }
+
+    /** @return int Height in pixels, 0 when not delivered. */
+    public function getHeight(): int { return $this->iHeight; }
 
     /**
      * Builds an image from the normalized adapter array.
      *
      * @param array $aData Entry from the outputs array with image_data, image_format,
-     *                     image_url, status and size.
+     *                     image_url, status, width and height.
      * @return self
      */
     public static function fromArray(array $aData): self
     {
-        $oInstance        = new self();
+        $oInstance = new self();
         $oInstance->hydrateImageData($aData);
-        $oInstance->sSize = $aData['size'] ?? '';
+        $oInstance->iWidth  = (int) ($aData['width'] ?? 0);
+        $oInstance->iHeight = (int) ($aData['height'] ?? 0);
         return $oInstance;
     }
 
     /**
      * Returns the image as an array, empty fields are left out.
      *
-     * @return array Image fields from HasImageData plus size.
+     * @return array Image fields from HasImageData plus width and height.
      */
     public function __toArray(): array
     {
         $aResult = $this->toArrayImageData();
-        if ($this->sSize !== '') {
-            $aResult['size'] = $this->sSize;
-        }
+        if ($this->iWidth > 0)  $aResult['width']  = $this->iWidth;
+        if ($this->iHeight > 0) $aResult['height'] = $this->iHeight;
         return $aResult;
     }
 

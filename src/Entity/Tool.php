@@ -94,7 +94,8 @@ class Tool
      * ChatOutput of type Image (for pure image requests use the Image endpoint).
      *
      * @param string|null $sModel             Optional image model.
-     * @param string|null $sSize              Optional image size (e.g. '1024x1024').
+     * @param int|null    $iWidth             Optional image width in pixels (pass together with $iHeight).
+     * @param int|null    $iHeight            Optional image height in pixels (pass together with $iWidth).
      * @param string|null $sQuality           Optional quality level.
      * @param string|null $sBackground        Optional background (e.g. 'transparent').
      * @param string|null $sModeration        Optional content moderation level.
@@ -106,7 +107,8 @@ class Tool
      */
     public static function imageGeneration(
         ?string $sModel = null,
-        ?string $sSize = null,
+        ?int    $iWidth = null,
+        ?int    $iHeight = null,
         ?string $sQuality = null,
         ?string $sBackground = null,
         ?string $sModeration = null,
@@ -117,7 +119,8 @@ class Tool
     ): array {
         $aResult = ['_type' => ToolType::ImageGeneration->value];
         if ($sModel !== null)            $aResult['model']              = $sModel;
-        if ($sSize !== null)             $aResult['size']               = $sSize;
+        if ($iWidth !== null)            $aResult['width']              = $iWidth;
+        if ($iHeight !== null)           $aResult['height']             = $iHeight;
         if ($sQuality !== null)          $aResult['quality']            = $sQuality;
         if ($sBackground !== null)       $aResult['background']         = $sBackground;
         if ($sModeration !== null)       $aResult['moderation']         = $sModeration;

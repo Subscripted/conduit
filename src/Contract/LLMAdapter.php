@@ -26,7 +26,7 @@ interface LLMAdapter
     /**
      * Sends an image request to the provider.
      *
-     * @param array $aPayload Neutral image payload (model, prompt, images, size, ...).
+     * @param array $aPayload Neutral image payload (model, prompt, images, width, height, ...).
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
      * @throws \Conduit\Exception\UnsupportedCapabilityException If the provider has no image endpoint.
      */

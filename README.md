@@ -225,7 +225,7 @@ connector has no approval step). When a call needs confirmation
 $response = $client->chat()
     ->model('gpt-5')
     ->content([Content::text('Draw a red bicycle.')])
-    ->tools([Tool::imageGeneration(sSize: '1024x1024')])
+    ->tools([Tool::imageGeneration(iWidth: 1024, iHeight: 1024)])
     ->call();
 
 foreach ($response->getImages() as $image) {
@@ -283,10 +283,12 @@ $response = (new LLMClient($openAiKey))
     ->image()
     ->model('gpt-image-1')
     ->prompt('An isometric city at dusk')
-    ->size('1024x1024')
+    ->size(1024, 1024)
     ->call();
 
 file_put_contents('city.png', base64_decode($response->getImageData()));
+$w = $response->getWidth();    // 1024
+$h = $response->getHeight();   // 1024
 ```
 
 Pass `->images([$url, ...])` to edit existing images instead of generating fresh
