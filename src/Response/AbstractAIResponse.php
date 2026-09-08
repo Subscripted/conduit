@@ -7,7 +7,6 @@ use Conduit\Contract\ErrorCollectionInterface;
 use Conduit\Contract\Hydratable;
 use Conduit\Contract\Output;
 use Conduit\Support\HasErrors;
-use Throwable;
 
 /**
  * Base for every response object (ChatResponse, ImageResponse).
