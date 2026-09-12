@@ -20,15 +20,15 @@ use Conduit\Exception\TransportException;
 abstract class AbstractLLMAdapter implements LLMAdapter
 {
     /** Requests with server tools (web search / web fetch) regularly run over a minute. */
-    private const REQUEST_TIMEOUT = 300;
-    private const CONNECT_TIMEOUT = 15;
+    private const int REQUEST_TIMEOUT = 300;
+    private const int CONNECT_TIMEOUT = 15;
 
     /**
      * Overload / rate limit on the provider side (529 overloaded_error, 429) and
      * short-lived server errors are transient — retry with growing back-off.
      */
-    private const MAX_ATTEMPTS     = 3;
-    private const RETRY_HTTP_CODES = [429, 500, 502, 503, 529];
+    private const int MAX_ATTEMPTS = 3;
+    private const array RETRY_HTTP_CODES = [429, 500, 502, 503, 529];
 
     /**
      * Provider-specific HTTP headers (mostly authentication).

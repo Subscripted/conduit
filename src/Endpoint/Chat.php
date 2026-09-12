@@ -15,9 +15,10 @@ use Conduit\Support\HasTools;
  * setters: $oClient->chat()->model(...)->content([...])->call(). Only call()
  * sends the request and returns a ChatResponse.
  *
- * Which provider is behind it is decided by the adapter set on the client —
- * this endpoint only knows the neutral payload format. Provider errors do
- * not throw, they come back as a ChatResponse with hasErrors() === true.
+ * Which provider is behind it is derived from the model id set via
+ * model(...) — see AdapterFactory::make(). This endpoint only knows the
+ * neutral payload format. Provider errors do not throw, they come back as a
+ * ChatResponse with hasErrors() === true.
  */
 class Chat extends AbstractLLMEndpoint
 {
@@ -43,10 +44,7 @@ class Chat extends AbstractLLMEndpoint
      */
     public function call(): ChatResponse
     {
-        $oAdapter = AdapterFactory::make(
-            $this->oClient->getAIProvider(),
-            $this->sApiKey
-        );
+        $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oProviderOverride);
 
         try {
             $aNormalized = $oAdapter->chat([

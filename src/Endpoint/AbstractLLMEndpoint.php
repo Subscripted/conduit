@@ -2,30 +2,29 @@
 
 namespace Conduit\Endpoint;
 
-use Conduit\Client\LLMClient;
+use Conduit\Enum\AIProvider;
 
 /**
  * Base for every endpoint (Chat, Image).
  *
  * An endpoint is created through the LLMClient, filled with fluent setters
  * ($oClient->chat()->model(...)->maxTokens(...)) and sent with call(). It
- * keeps the API key and a reference to the client, which knows the selected
- * provider and hands out the matching adapter.
+ * keeps the API key; which provider it talks to is resolved by
+ * AdapterFactory::make() from the model set via model(...), unless
+ * provider(...) forces one.
  */
 abstract class AbstractLLMEndpoint
 {
-    protected string    $sApiKey;
-    protected LLMClient $oClient;
-    protected string    $sModel;
+    protected string $sApiKey;
+    protected string $sModel;
+    protected ?AIProvider $oProviderOverride = null;
 
     /**
-     * @param string    $sApiKey API key of the provider account.
-     * @param LLMClient $oClient Client with a provider already set.
+     * @param string $sApiKey API key of the provider account.
      */
-    public function __construct(string $sApiKey, LLMClient $oClient)
+    public function __construct(string $sApiKey)
     {
         $this->sApiKey = $sApiKey;
-        $this->oClient = $oClient;
     }
 
     /**
@@ -44,6 +43,20 @@ abstract class AbstractLLMEndpoint
     public function model(string $sModel): static
     {
         $this->sModel = $sModel;
+        return $this;
+    }
+
+    /**
+     * Forces the provider for this request, bypassing AIProvider::fromModel().
+     * Only needed for model ids the built-in patterns can't recognize —
+     * custom deployments, fine-tune aliases, and similar edge cases.
+     *
+     * @param AIProvider $oProvider Provider to use regardless of the model id.
+     * @return static
+     */
+    public function provider(AIProvider $oProvider): static
+    {
+        $this->oProviderOverride = $oProvider;
         return $this;
     }
 }

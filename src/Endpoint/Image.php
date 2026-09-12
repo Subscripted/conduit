@@ -39,10 +39,7 @@ class Image extends AbstractLLMEndpoint
      */
     public function call(): ImageResponse
     {
-        $oAdapter = AdapterFactory::make(
-            $this->oClient->getAIProvider(),
-            $this->sApiKey
-        );
+        $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oProviderOverride);
 
         try {
             $aNormalized = $oAdapter->image([

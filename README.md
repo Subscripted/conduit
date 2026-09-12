@@ -40,16 +40,19 @@ PSR-4 autoloading under the `Conduit\` namespace (`src/`).
 
 ## Quick start
 
+There is no provider to select — `LLMClient` only ever hands out `chat()` /
+`image()`. The provider is derived from the model id you pass to `model(...)`
+(`AIProvider::fromModel()`), so switching provider is just switching the model
+id and the key:
+
 ```php
 use Conduit\Client\LLMClient;
-use Conduit\Enum\AIProvider;
 use Conduit\Entity\Content;
 
-$client = (new LLMClient($apiKey))
-    ->setAIProvider(AIProvider::Anthropic);
+$client = new LLMClient($apiKey);
 
 $response = $client->chat()
-    ->model('claude-opus-5')
+    ->model('claude-opus-5')            // 'claude-...' → Anthropic
     ->instruction('You answer in one sentence.')
     ->content([Content::text('Why is the sky blue?')])
     ->call();
@@ -57,16 +60,26 @@ $response = $client->chat()
 echo $response;            // first text block — ChatResponse has __toString()
 ```
 
-Switching provider changes two things — the enum and the model id — and nothing
-else:
-
 ```php
 $response = (new LLMClient($openAiKey))
-    ->setAIProvider(AIProvider::OpenAI)
     ->chat()
-    ->model('gpt-5')
+    ->model('gpt-5')                    // 'gpt-...' → OpenAI
     ->instruction('You answer in one sentence.')
     ->content([Content::text('Why is the sky blue?')])
+    ->call();
+```
+
+For a model id the built-in patterns can't recognize (a custom deployment
+name, a fine-tune alias, ...), force the provider explicitly with
+`provider(...)`:
+
+```php
+use Conduit\Enum\AIProvider;
+
+$response = $client->chat()
+    ->model('my-custom-deployment')
+    ->provider(AIProvider::OpenAI)
+    ->content([Content::text('hi')])
     ->call();
 ```
 
@@ -79,7 +92,8 @@ Only `call()` performs the HTTP request.
 
 | Setter | Purpose | Default |
 | --- | --- | --- |
-| `model(string)` | Model id. Required. | — |
+| `model(string)` | Model id. Required — decides the provider via `AIProvider::fromModel()`. | — |
+| `provider(AIProvider)` | Forces the provider, bypassing `AIProvider::fromModel()`. Only needed for model ids the built-in patterns can't recognize. | derived from model id |
 | `instruction(string)` | System prompt. | none |
 | `content(array)` | The user turn — blocks from `Content::…`. | `[]` |
 | `context(array)` | Prior turns — messages from `Context::…`. | `[]` |
@@ -310,7 +324,6 @@ Levels: `Low`, `Medium`, `High`, `XHigh`, `Max`.
 
 ```php
 $response = (new LLMClient($openAiKey))
-    ->setAIProvider(AIProvider::OpenAI)
     ->image()
     ->model('gpt-image-1')
     ->prompt('An isometric city at dusk')
@@ -404,46 +417,56 @@ The collection holds exception objects, not strings:
 | `TransportException` | `RuntimeException` | provider never reached (cURL / TLS / timeout) |
 | `ApiException` | `RuntimeException` | HTTP ≥ 400; carries `int $iStatusCode`, `?array $aResponseBody` |
 | `UnsupportedCapabilityException` | `LogicException` | provider can't serve the endpoint (Anthropic + images, Google) |
-| `ConfigurationException` | `InvalidArgumentException` | empty API key, or endpoint used before `setAIProvider()` |
+| `ConfigurationException` | `InvalidArgumentException` | empty API key, or a model id `AIProvider::fromModel()` can't resolve (use `provider(...)` for those) |
 
 `TransportException` and `ApiException` on retryable statuses (`429`, `500`,
 `502`, `503`, `529`) are retried up to 3 times with exponential backoff before
-they surface. `ConfigurationException` is thrown eagerly from `LLMClient` — it's
-a programming error, fix the call site.
+they surface. `ConfigurationException` is thrown eagerly — it's a programming
+error, fix the call site.
 
 ---
 
 ## Architecture
 
 ```
-LLMClient ── setAIProvider(AIProvider) ─────────────┐
-    │  chat()/image()                               │
-    ▼                                               ▼
-Chat / Image endpoint ── call() ──► AdapterFactory ──► LLMAdapter
-    (neutral payload)                                    ├─ OpenAIAdapter
-                                                         └─ AnthropicAdapter
-                                                              │
-                                          neutral response ◄──┘  (normalized array)
+LLMClient ── chat()/image() ──► Chat / Image endpoint
+                                     │  model(...) [+ optional provider(...)]
+                                     ▼
+                                   call() ──► AdapterFactory::make()
+                                                    │
+                                    AIProvider::fromModel() unless
+                                    provider(...) forced one
                                                     │
                                                     ▼
-                                        ChatResponse / ImageResponse
-                                        (ChatOutput / ImageOutput blocks)
+                                               LLMAdapter
+                                                    ├─ OpenAIAdapter
+                                                    └─ AnthropicAdapter
+                                                         │
+                                     neutral response ◄──┘  (normalized array)
+                                               │
+                                               ▼
+                                   ChatResponse / ImageResponse
+                                   (ChatOutput / ImageOutput blocks)
 ```
 
-The endpoints only ever build the neutral payload. Each adapter owns the full
+`LLMClient` is nothing but an access point — it holds the API key and hands
+out endpoints, it never picks a provider itself. The endpoints only ever build
+the neutral payload; `AdapterFactory` is the one place that turns a model id
+into a provider and then into a concrete adapter. Each adapter owns the full
 round trip for its provider: request-body assembly, provider-specific headers,
 the HTTP call (shared retry/backoff in `AbstractLLMAdapter`), and normalization
 of the answer into the array the response objects hydrate from.
 
 ### Adding a provider
 
-1. Add a case to `Conduit\Enum\AIProvider`.
+1. Add a case to `Conduit\Enum\AIProvider` and a matching pattern in its
+   `PATTERNS` table so `fromModel()` can recognize that provider's model ids.
 2. Write `Conduit\Adapter\YourAdapter extends AbstractLLMAdapter` implementing
    `chat()` and `image()` (throw `UnsupportedCapabilityException` from whichever
    it can't serve).
 3. Add the `match` arm in `Conduit\Factory\AdapterFactory`.
 
-No endpoint, entity or response code changes.
+No client, endpoint, entity or response code changes.
 
 ### Project layout
 

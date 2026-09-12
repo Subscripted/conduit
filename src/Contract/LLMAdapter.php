@@ -2,6 +2,8 @@
 
 namespace Conduit\Contract;
 
+use Conduit\Exception\UnsupportedCapabilityException;
+
 /**
  * Contract every provider adapter must fulfil. Both methods take the
  * provider-neutral payload of the endpoint and return the response in the
@@ -28,7 +30,7 @@ interface LLMAdapter
      *
      * @param array $aPayload Neutral image payload (model, prompt, images, width, height, ...).
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
-     * @throws \Conduit\Exception\UnsupportedCapabilityException If the provider has no image endpoint.
+     * @throws UnsupportedCapabilityException If the provider has no image endpoint.
      */
     public function image(array $aPayload): array;
 }

@@ -284,18 +284,34 @@ class AnthropicAdapter extends AbstractLLMAdapter
             switch ($sType) {
                 case ToolType::WebSearch->value:
                     $aBuilt = ['type' => self::WEB_SEARCH_TYPE, 'name' => 'web_search'];
-                    if (!empty($aTool['max_uses']))        $aBuilt['max_uses']        = $aTool['max_uses'];
-                    if (!empty($aTool['allowed_domains'])) $aBuilt['allowed_domains'] = $aTool['allowed_domains'];
-                    if (!empty($aTool['blocked_domains'])) $aBuilt['blocked_domains'] = $aTool['blocked_domains'];
+                    if (!empty($aTool['max_uses'])) {
+                        $aBuilt['max_uses'] = $aTool['max_uses'];
+                    }
+                    if (!empty($aTool['allowed_domains'])) {
+                        $aBuilt['allowed_domains'] = $aTool['allowed_domains'];
+                    }
+                    if (!empty($aTool['blocked_domains'])) {
+                        $aBuilt['blocked_domains'] = $aTool['blocked_domains'];
+                    }
                     break;
 
                 case ToolType::WebFetch->value:
                     $aBuilt = ['type' => self::WEB_FETCH_TYPE, 'name' => 'web_fetch'];
-                    if (!empty($aTool['max_uses']))        $aBuilt['max_uses']        = $aTool['max_uses'];
-                    if (!empty($aTool['allowed_domains'])) $aBuilt['allowed_domains'] = $aTool['allowed_domains'];
-                    if (!empty($aTool['blocked_domains'])) $aBuilt['blocked_domains'] = $aTool['blocked_domains'];
-                    if (isset($aTool['citations']))        $aBuilt['citations']       = ['enabled' => (bool)$aTool['citations']];
-                    if (!empty($aTool['max_content_tokens'])) $aBuilt['max_content_tokens'] = $aTool['max_content_tokens'];
+                    if (!empty($aTool['max_uses'])) {
+                        $aBuilt['max_uses'] = $aTool['max_uses'];
+                    }
+                    if (!empty($aTool['allowed_domains'])) {
+                        $aBuilt['allowed_domains'] = $aTool['allowed_domains'];
+                    }
+                    if (!empty($aTool['blocked_domains'])) {
+                        $aBuilt['blocked_domains'] = $aTool['blocked_domains'];
+                    }
+                    if (isset($aTool['citations'])) {
+                        $aBuilt['citations'] = ['enabled' => (bool)$aTool['citations']];
+                    }
+                    if (!empty($aTool['max_content_tokens'])) {
+                        $aBuilt['max_content_tokens'] = $aTool['max_content_tokens'];
+                    }
                     break;
 
                 case ToolType::Function->value:
@@ -325,10 +341,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
                         }
                     }
                     break;
-
-                // image_generation is not supported by Anthropic — skip silently
             }
-
             if ($aBuilt !== null) {
                 $aResult[] = $aBuilt;
             }

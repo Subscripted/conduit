@@ -3,6 +3,8 @@
 namespace Conduit\Adapter;
 
 use Conduit\Enum\ToolType;
+use Conduit\Exception\ApiException;
+use Conduit\Exception\TransportException;
 
 /**
  * Adapter for the OpenAI Responses API and the Images API.
@@ -40,7 +42,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
      *                        content, user, tools, effort, effortSummary.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
-     * @throws \Conduit\Exception\TransportException|\Conduit\Exception\ApiException If the HTTP request or the API fails.
+     * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
     public function chat(array $aPayload): array
     {
@@ -79,7 +81,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
      *
      * @param array $aPayload Neutral payload: model, prompt, images, width, height, quality, outputFormat.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
-     * @throws \Conduit\Exception\TransportException|\Conduit\Exception\ApiException If the HTTP request or the API fails.
+     * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
     public function image(array $aPayload): array
     {
@@ -93,9 +95,15 @@ class OpenAIAdapter extends AbstractLLMAdapter
         }
 
         $sSize = $this->sizeToString((int) ($aPayload['width'] ?? 0), (int) ($aPayload['height'] ?? 0));
-        if ($sSize !== null)                   $aBody['size']          = $sSize;
-        if (!empty($aPayload['quality']))      $aBody['quality']       = $aPayload['quality'];
-        if (!empty($aPayload['outputFormat'])) $aBody['output_format'] = $aPayload['outputFormat'];
+        if ($sSize !== null) {
+            $aBody['size'] = $sSize;
+        }
+        if (!empty($aPayload['quality'])) {
+            $aBody['quality'] = $aPayload['quality'];
+        }
+        if (!empty($aPayload['outputFormat'])) {
+            $aBody['output_format'] = $aPayload['outputFormat'];
+        }
 
         $aRaw = $this->request(self::BASE_URL . '/images/edits', $aBody);
         return $this->normalizeImageResponse($aRaw);
@@ -244,11 +252,19 @@ class OpenAIAdapter extends AbstractLLMAdapter
             switch ($sType) {
                 case ToolType::WebSearch->value:
                     $aBuilt = ['type' => 'web_search', 'search_context_size' => $aTool['context_size'] ?? 'medium'];
-                    if (!empty($aTool['user_location']))   $aBuilt['user_location'] = $aTool['user_location'];
+                    if (!empty($aTool['user_location'])) {
+                        $aBuilt['user_location'] = $aTool['user_location'];
+                    }
                     $aFilters = [];
-                    if (!empty($aTool['allowed_domains'])) $aFilters['allowed_domains'] = $aTool['allowed_domains'];
-                    if (!empty($aTool['blocked_domains'])) $aFilters['blocked_domains'] = $aTool['blocked_domains'];
-                    if (!empty($aFilters))                 $aBuilt['filters'] = $aFilters;
+                    if (!empty($aTool['allowed_domains'])) {
+                        $aFilters['allowed_domains'] = $aTool['allowed_domains'];
+                    }
+                    if (!empty($aTool['blocked_domains'])) {
+                        $aFilters['blocked_domains'] = $aTool['blocked_domains'];
+                    }
+                    if (!empty($aFilters)) {
+                        $aBuilt['filters'] = $aFilters;
+                    }
                     break;
 
                 case ToolType::Function->value:
@@ -264,16 +280,34 @@ class OpenAIAdapter extends AbstractLLMAdapter
 
                 case ToolType::ImageGeneration->value:
                     $aBuilt = ['type' => 'image_generation'];
-                    if (!empty($aTool['model']))              $aBuilt['model']              = $aTool['model'];
+                    if (!empty($aTool['model'])) {
+                        $aBuilt['model'] = $aTool['model'];
+                    }
                     $sImgSize = $this->sizeToString((int) ($aTool['width'] ?? 0), (int) ($aTool['height'] ?? 0));
-                    if ($sImgSize !== null)                   $aBuilt['size']               = $sImgSize;
-                    if (!empty($aTool['quality']))            $aBuilt['quality']            = $aTool['quality'];
-                    if (!empty($aTool['background']))         $aBuilt['background']         = $aTool['background'];
-                    if (!empty($aTool['moderation']))         $aBuilt['moderation']         = $aTool['moderation'];
-                    if (!empty($aTool['input_fidelity']))     $aBuilt['input_fidelity']     = $aTool['input_fidelity'];
-                    if (!empty($aTool['output_format']))      $aBuilt['output_format']      = $aTool['output_format'];
-                    if (isset($aTool['output_compression']))  $aBuilt['output_compression'] = $aTool['output_compression'];
-                    if (isset($aTool['partial_images']))      $aBuilt['partial_images']     = $aTool['partial_images'];
+                    if ($sImgSize !== null) {
+                        $aBuilt['size'] = $sImgSize;
+                    }
+                    if (!empty($aTool['quality'])) {
+                        $aBuilt['quality'] = $aTool['quality'];
+                    }
+                    if (!empty($aTool['background'])) {
+                        $aBuilt['background'] = $aTool['background'];
+                    }
+                    if (!empty($aTool['moderation'])) {
+                        $aBuilt['moderation'] = $aTool['moderation'];
+                    }
+                    if (!empty($aTool['input_fidelity'])) {
+                        $aBuilt['input_fidelity'] = $aTool['input_fidelity'];
+                    }
+                    if (!empty($aTool['output_format'])) {
+                        $aBuilt['output_format'] = $aTool['output_format'];
+                    }
+                    if (isset($aTool['output_compression'])) {
+                        $aBuilt['output_compression'] = $aTool['output_compression'];
+                    }
+                    if (isset($aTool['partial_images'])) {
+                        $aBuilt['partial_images'] = $aTool['partial_images'];
+                    }
                     break;
 
                 case ToolType::Mcp->value:
@@ -289,10 +323,18 @@ class OpenAIAdapter extends AbstractLLMAdapter
                     } elseif (!empty($aTool['url'])) {
                         $aBuilt['server_url'] = $aTool['url'];
                     }
-                    if (!empty($aTool['description']))         $aBuilt['server_description'] = $aTool['description'];
-                    if (!empty($aTool['authorization_token'])) $aBuilt['authorization']     = $aTool['authorization_token'];
-                    if (!empty($aTool['headers']))             $aBuilt['headers']           = $aTool['headers'];
-                    if (!empty($aTool['allowed_tools']))       $aBuilt['allowed_tools']     = $aTool['allowed_tools'];
+                    if (!empty($aTool['description'])) {
+                        $aBuilt['server_description'] = $aTool['description'];
+                    }
+                    if (!empty($aTool['authorization_token'])) {
+                        $aBuilt['authorization'] = $aTool['authorization_token'];
+                    }
+                    if (!empty($aTool['headers'])) {
+                        $aBuilt['headers'] = $aTool['headers'];
+                    }
+                    if (!empty($aTool['allowed_tools'])) {
+                        $aBuilt['allowed_tools'] = $aTool['allowed_tools'];
+                    }
                     break;
             }
 
