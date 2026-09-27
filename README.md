@@ -16,10 +16,14 @@ call-site edits.
   `hasErrors() === true`, carrying the original exception object.
 - **No runtime dependencies** beyond `ext-curl`.
 
-Supported today: **OpenAI** (Responses API + Images API) and **Anthropic**
-(Messages API). Both cover chat, tool calling, web search, structured output and
-reasoning effort; OpenAI additionally covers image generation. Remote **MCP**
-servers work on both.
+Supported today: **OpenAI** (Responses API + Images API), **Anthropic**
+(Messages API) and **Mistral** (Conversations API). OpenAI and Anthropic
+cover chat, tool calling, web search, structured output and reasoning effort;
+OpenAI additionally covers image generation. Mistral covers chat, function
+calling, structured output and reasoning effort; its built-in tools (web
+search, code interpreter, image generation) exist on the Conversations API
+but aren't wired up in this adapter yet — see the tool support table below.
+Remote **MCP** servers work on OpenAI and Anthropic.
 
 ---
 
@@ -97,7 +101,7 @@ Only `call()` performs the HTTP request.
 | `instruction(string)` | System prompt. | none |
 | `content(array)` | The user turn — blocks from `Content::…`. | `[]` |
 | `context(array)` | Prior turns — messages from `Context::…`. | `[]` |
-| `user(string)` | Role of the current turn (`user` / `assistant`). OpenAI only. | `user` |
+| `user(string)` | Role of the current turn (`user` / `assistant`). OpenAI and Mistral only. | `user` |
 | `maxTokens(int)` | Answer length cap. | `1024` |
 | `effort(ThinkingEffort, bool $summary = false)` | Reasoning depth; optionally ask for a summary. | `Low` |
 | `jsonSchema(array)` | Force a JSON Schema on the answer. | none |
@@ -153,32 +157,32 @@ All tool definitions come from the `Conduit\Entity\Tool` factory. The neutral
 
 **Tools** (`Conduit\Entity\Tool`):
 
-| `Tool::` factory     | OpenAI | Anthropic | Notes |
-| -------------------- | :----: | :-------: | ----- |
-| `function()`         |   ✅   |    ✅     | custom function calling |
-| `webSearch()`        |   ✅   |    ✅     | `user_location` (from `location()`) is applied by OpenAI only |
-| `webFetch()`         |   ❌   |    ✅     | OpenAI folds page fetching into `webSearch()` |
-| `imageGeneration()`  |   ✅   |    ❌     | Anthropic has no image capability |
-| `mcp()`              |   ✅   |    ✅     | Anthropic ignores `sRequireApproval`, `aHeaders`, `sDescription`, `sConnectorId` |
+| `Tool::` factory     | OpenAI | Anthropic | Mistral | Notes |
+| -------------------- | :----: | :-------: | :-----: | ----- |
+| `function()`         |   ✅   |    ✅     |   ✅    | custom function calling |
+| `webSearch()`        |   ✅   |    ✅     |   ❌    | `user_location` (from `location()`) is applied by OpenAI only; Mistral has a `web_search` connector on the Conversations API, but this adapter doesn't map the neutral shape onto it yet |
+| `webFetch()`         |   ❌   |    ✅     |   ❌    | OpenAI folds page fetching into `webSearch()` |
+| `imageGeneration()`  |   ✅   |    ❌     |   ❌    | Anthropic has no image capability at all; Mistral has an `image_generation` connector on the Conversations API, not yet wired here |
+| `mcp()`              |   ✅   |    ✅     |   ❌    | Anthropic ignores `sRequireApproval`, `aHeaders`, `sDescription`, `sConnectorId`; Mistral's connector model is registration-based (`connector_id`), not a raw URL like `Tool::mcp()` expects |
 
 **Request features:**
 
-| Feature | OpenAI | Anthropic | Notes |
-| --- | :---: | :---: | --- |
-| `chat()` | ✅ | ✅ | |
-| `image()` endpoint | ✅ | ❌ | Anthropic returns an error response (`UnsupportedCapabilityException`) |
-| `instruction()`, `context()`, `content()` | ✅ | ✅ | |
-| image / file (PDF) input via `Content::` | ✅ | ✅ | |
-| `effort()` + thinking summary | ✅ | ✅ | |
-| function-call round-trip (`Context::tool()`) | ✅ | ✅ | |
-| retry + backoff on `429` / `5xx` | ✅ | ✅ | shared in `AbstractLLMAdapter` |
-| `jsonSchema()` structured output | ❌ | ✅ | not yet wired in the OpenAI adapter — the schema is dropped |
-| `user()` role override | ✅ | ❌ | Anthropic always sends the turn as `user` |
-| `Context::mcpApproval()` | ✅ | ❌ | Anthropic's MCP connector has no approval step |
+| Feature | OpenAI | Anthropic | Mistral | Notes |
+| --- | :---: | :---: | :---: | --- |
+| `chat()` | ✅ | ✅ | ✅ | |
+| `image()` endpoint | ✅ | ❌ | ❌ | Anthropic and Mistral return an error response (`UnsupportedCapabilityException`) |
+| `instruction()`, `context()`, `content()` | ✅ | ✅ | ✅ | |
+| image / file (PDF) input via `Content::` | ✅ | ✅ | ✅ | Mistral takes files as `document_url` |
+| `effort()` + thinking summary | ✅ | ✅ | partial | Mistral maps `effort()` to `reasoning_effort`; the thinking-summary flag has no Mistral equivalent |
+| function-call round-trip (`Context::tool()`) | ✅ | ✅ | ✅ | |
+| retry + backoff on `429` / `5xx` | ✅ | ✅ | ✅ | shared in `AbstractLLMAdapter` |
+| `jsonSchema()` structured output | ❌ | ✅ | ✅ | not yet wired in the OpenAI adapter — the schema is dropped |
+| `user()` role override | ✅ | ❌ | ✅ | Anthropic always sends the turn as `user` |
+| `Context::mcpApproval()` | ✅ | ❌ | ❌ | only OpenAI's MCP connector has an approval step |
 
 A tool or field the active provider doesn't support is **dropped silently** — the
 request still runs, it just isn't sent. The `image()` endpoint is the one
-exception: on Anthropic it returns an error response, it is not ignored.
+exception: on Anthropic and Mistral it returns an error response, it is not ignored.
 
 ### Custom functions
 
@@ -416,7 +420,7 @@ The collection holds exception objects, not strings:
 | `ConduitException` | *interface* | marker — `catch` this for "any Conduit failure" |
 | `TransportException` | `RuntimeException` | provider never reached (cURL / TLS / timeout) |
 | `ApiException` | `RuntimeException` | HTTP ≥ 400; carries `int $iStatusCode`, `?array $aResponseBody` |
-| `UnsupportedCapabilityException` | `LogicException` | provider can't serve the endpoint (Anthropic + images, Google) |
+| `UnsupportedCapabilityException` | `LogicException` | provider can't serve the endpoint (Anthropic/Mistral + images, Google) |
 | `ConfigurationException` | `InvalidArgumentException` | empty API key, or a model id `AIProvider::fromModel()` can't resolve (use `provider(...)` for those) |
 
 `TransportException` and `ApiException` on retryable statuses (`429`, `500`,
@@ -440,7 +444,8 @@ LLMClient ── chat()/image() ──► Chat / Image endpoint
                                                     ▼
                                                LLMAdapter
                                                     ├─ OpenAIAdapter
-                                                    └─ AnthropicAdapter
+                                                    ├─ AnthropicAdapter
+                                                    └─ MistralAdapter
                                                          │
                                      neutral response ◄──┘  (normalized array)
                                                │
@@ -472,7 +477,7 @@ No client, endpoint, entity or response code changes.
 
 ```
 src/
-  Adapter/     AbstractLLMAdapter, OpenAIAdapter, AnthropicAdapter
+  Adapter/     AbstractLLMAdapter, OpenAIAdapter, AnthropicAdapter, MistralAdapter
   Client/      LLMClient
   Contract/    LLMAdapter, Castable, Hydratable, Output, ErrorCollectionInterface
   Endpoint/    AbstractLLMEndpoint, Chat, Image

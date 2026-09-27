@@ -14,13 +14,13 @@ use Conduit\Exception\ConfigurationException;
  * request goes to is decided later, by AdapterFactory::make() from the model
  * id set on the endpoint; the client itself never picks or resolves one.
  */
-class LLMClient
+readonly class LLMClient
 {
     /**
      * @param string $sApiKey API key used for whichever provider the model resolves to.
      * @throws ConfigurationException If the key is empty.
      */
-    public function __construct(private readonly string $sApiKey)
+    public function __construct(private string $sApiKey)
     {
         if (empty($sApiKey)) {
             throw new ConfigurationException('API key may not be empty');

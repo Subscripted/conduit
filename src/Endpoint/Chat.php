@@ -103,7 +103,7 @@ class Chat extends AbstractLLMEndpoint
 
     /**
      * Role of the current message (default 'user'). Only evaluated by the
-     * OpenAI adapter, Anthropic always sends as 'user'.
+     * OpenAI and Mistral adapters, Anthropic always sends as 'user'.
      *
      * @param string $sUser Role, e.g. 'user' or 'assistant'.
      * @return self

@@ -3,6 +3,7 @@
 namespace Conduit\Factory;
 
 use Conduit\Adapter\AnthropicAdapter;
+use Conduit\Adapter\MistralAdapter;
 use Conduit\Adapter\OpenAIAdapter;
 use Conduit\Contract\LLMAdapter;
 use Conduit\Enum\AIProvider;
@@ -36,6 +37,7 @@ class AdapterFactory
         return match ($oProviderOverride ?? AIProvider::fromModel($sModel)) {
             AIProvider::OpenAI    => new OpenAIAdapter($sApiKey),
             AIProvider::Anthropic => new AnthropicAdapter($sApiKey),
+            AIProvider::Mistral   => new MistralAdapter($sApiKey),
             AIProvider::Google    => throw new UnsupportedCapabilityException('Google adapter not yet implemented'),
         };
     }

@@ -15,6 +15,7 @@ enum AIProvider
 {
     case OpenAI;
     case Anthropic;
+    case Mistral;
     case Google;
 
     /**
@@ -28,6 +29,7 @@ enum AIProvider
         '/^claude-/i'                            => self::Anthropic,
         '/^(gpt-|o\d|chatgpt-|ft:gpt-|omni-)/i'  => self::OpenAI,
         '/^(gemini-|palm-|bison)/i'               => self::Google,
+        '/^(mistral-|magistral-|codestral-|ministral-|pixtral-|open-mistral|open-mixtral)/i' => self::Mistral,
     ];
 
     /**

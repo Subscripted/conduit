@@ -33,6 +33,11 @@ class ApiException extends RuntimeException implements ConduitException
      * `error.message` out of the decoded body when present, otherwise falls
      * back to the raw payload.
      *
+     * OpenAI and Anthropic put a plain string there. Mistral's validation
+     * errors instead put a list of `{msg: ...}` objects (or plain strings) in
+     * `message` / `detail` — those are joined into one string rather than
+     * passed through as an array.
+     *
      * @param int        $iStatusCode HTTP status code.
      * @param string     $sRawBody    Response body as received.
      * @param array|null $aDecoded    json_decode() result of $sRawBody, or null.
@@ -40,7 +45,17 @@ class ApiException extends RuntimeException implements ConduitException
      */
     public static function fromResponse(int $iStatusCode, string $sRawBody, ?array $aDecoded = null): self
     {
-        $sProviderMessage = $aDecoded['error']['message'] ?? $aDecoded['message'] ?? $sRawBody;
+        $mMessage = $aDecoded['error']['message'] ?? $aDecoded['message'] ?? $aDecoded['detail'] ?? null;
+
+        if (is_array($mMessage)) {
+            $mMessage = implode('; ', array_filter(array_map(
+                static fn ($mEntry) => is_array($mEntry) ? ($mEntry['msg'] ?? null) : (is_string($mEntry) ? $mEntry : null),
+                $mMessage,
+            )));
+        }
+
+        $sProviderMessage = !empty($mMessage) ? $mMessage : $sRawBody;
+
         return new self(
             "API error {$iStatusCode}: {$sProviderMessage}",
             $iStatusCode,
