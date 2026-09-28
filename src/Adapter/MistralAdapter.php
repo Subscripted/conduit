@@ -122,7 +122,7 @@ class MistralAdapter extends AbstractLLMAdapter
         }
 
         $aRaw = $this->request(self::BASE_URL . '/conversations', $aBody);
-        return $this->normalizeResponse($aRaw, $aPayload['model']);
+        return $this->normalizeResponse($aRaw, $aPayload['model'], !empty($aPayload['jsonSchema']));
     }
 
     // ── Input builder ─────────────────────────────────────────────────────
@@ -277,11 +277,13 @@ class MistralAdapter extends AbstractLLMAdapter
      * field of its own — the model id from the request is passed back in
      * instead so ChatResponse::getModel() isn't left empty.
      *
-     * @param array  $aRaw    Decoded JSON answer of the Conversations API.
-     * @param string $sModel  Model id that was sent in the request.
+     * @param array  $aRaw           Decoded JSON answer of the Conversations API.
+     * @param string $sModel         Model id that was sent in the request.
+     * @param bool   $bJsonRequested Whether the request carried a jsonSchema — a text chunk is
+     *                               then the structured answer and normalizes to type 'json'.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
      */
-    private function normalizeResponse(array $aRaw, string $sModel): array
+    private function normalizeResponse(array $aRaw, string $sModel, bool $bJsonRequested = false): array
     {
         $aOutputs = [];
 
@@ -291,11 +293,11 @@ class MistralAdapter extends AbstractLLMAdapter
                     $mContent = $aEntry['content'] ?? '';
                     if (is_string($mContent)) {
                         if ($mContent !== '') {
-                            $aOutputs[] = ['type' => 'text', 'text' => $mContent];
+                            $aOutputs[] = ['type' => $bJsonRequested ? 'json' : 'text', 'text' => $mContent];
                         }
                     } else {
                         foreach ($mContent as $aChunk) {
-                            $aOutputs[] = $this->normalizeMessageChunk($aChunk);
+                            $aOutputs[] = $this->normalizeMessageChunk($aChunk, $bJsonRequested);
                         }
                     }
                     break;
@@ -327,14 +329,16 @@ class MistralAdapter extends AbstractLLMAdapter
      * sub-chunks, which are joined into one string. Unknown chunk types are
      * treated as text so the content is not lost.
      *
-     * @param array $aChunk Chunk from the content array of a message.output entry.
+     * @param array $aChunk         Chunk from the content array of a message.output entry.
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — a text chunk is
+     *                              then the structured answer and normalizes to type 'json'.
      * @return array Normalized output block.
      */
-    private function normalizeMessageChunk(array $aChunk): array
+    private function normalizeMessageChunk(array $aChunk, bool $bJsonRequested = false): array
     {
         switch ($aChunk['type'] ?? '') {
             case 'text':
-                return ['type' => 'text', 'text' => $aChunk['text'] ?? ''];
+                return ['type' => $bJsonRequested ? 'json' : 'text', 'text' => $aChunk['text'] ?? ''];
             case 'thinking':
                 $sThinking = '';
                 foreach ($aChunk['thinking'] ?? [] as $aPart) {

@@ -40,7 +40,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * Sends a chat request to the Responses API.
      *
      * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
-     *                        content, user, tools, effort, effortSummary.
+     *                        content, user, tools, effort, effortSummary, jsonSchema.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
      * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
@@ -69,9 +69,19 @@ class OpenAIAdapter extends AbstractLLMAdapter
                 $aBody['tools'] = $aBuiltTools;
             }
         }
+        if (!empty($aPayload['jsonSchema'])) {
+            $aBody['text'] = [
+                'format' => [
+                    'type'   => 'json_schema',
+                    'name'   => 'response',
+                    'schema' => $aPayload['jsonSchema'],
+                    'strict' => true,
+                ],
+            ];
+        }
 
         $aRaw = $this->request(self::BASE_URL . '/responses', $aBody);
-        return $this->normalizeResponse($aRaw);
+        return $this->normalizeResponse($aRaw, !empty($aPayload['jsonSchema']));
     }
 
     /**
@@ -353,10 +363,12 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * A reasoning item without a summary yields no text and is skipped so no
      * empty thinking outputs appear.
      *
-     * @param array $aRaw Decoded JSON answer of the Responses API.
+     * @param array $aRaw           Decoded JSON answer of the Responses API.
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — an output_text
+     *                              block is then the structured answer and normalizes to type 'json'.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
      */
-    private function normalizeResponse(array $aRaw): array
+    private function normalizeResponse(array $aRaw, bool $bJsonRequested = false): array
     {
         $aOutputs = [];
 
@@ -364,7 +376,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
             switch ($aItem['type'] ?? '') {
                 case 'message':
                     foreach ($aItem['content'] ?? [] as $aBlock) {
-                        $aOutputs[] = $this->normalizeMessageBlock($aBlock);
+                        $aOutputs[] = $this->normalizeMessageBlock($aBlock, $bJsonRequested);
                     }
                     break;
 
@@ -455,15 +467,17 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * Translates a single block of a message into the neutral format.
      * Unknown block types are treated as text so the content is not lost.
      *
-     * @param array $aBlock Block from the content array of a message.
+     * @param array $aBlock         Block from the content array of a message.
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — an output_text
+     *                              block is then the structured answer and normalizes to type 'json'.
      * @return array Normalized output block.
      */
-    private function normalizeMessageBlock(array $aBlock): array
+    private function normalizeMessageBlock(array $aBlock, bool $bJsonRequested = false): array
     {
         switch ($aBlock['type'] ?? '') {
             case 'output_text':
                 return [
-                    'type'        => 'text',
+                    'type'        => $bJsonRequested ? 'json' : 'text',
                     'text'        => $aBlock['text'] ?? '',
                     'annotations' => $this->normalizeAnnotations($aBlock['annotations'] ?? []),
                 ];

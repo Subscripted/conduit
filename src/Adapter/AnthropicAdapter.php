@@ -138,7 +138,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
         }
 
         $aRaw = $this->request(self::BASE_URL . '/messages', $aBody);
-        return $this->normalizeResponse($aRaw);
+        return $this->normalizeResponse($aRaw, !empty($aPayload['jsonSchema']));
     }
 
     // ── Input builder ─────────────────────────────────────────────────────
@@ -386,10 +386,12 @@ class AnthropicAdapter extends AbstractLLMAdapter
      * depending on the model — both land on the same neutral type, real
      * function calls on function_call.
      *
-     * @param array $aRaw Decoded JSON answer of the Messages API.
+     * @param array $aRaw           Decoded JSON answer of the Messages API.
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — a text block is
+     *                              then the structured answer and normalizes to type 'json'.
      * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
      */
-    private function normalizeResponse(array $aRaw): array
+    private function normalizeResponse(array $aRaw, bool $bJsonRequested = false): array
     {
         $aOutputs = [];
 
@@ -397,7 +399,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
             switch ($aBlock['type'] ?? '') {
                 case 'text':
                     $aOutputs[] = [
-                        'type' => 'text',
+                        'type' => $bJsonRequested ? 'json' : 'text',
                         'text' => $aBlock['text'] ?? '',
                         'annotations' => $this->normalizeCitations($aBlock['citations'] ?? []),
                     ];

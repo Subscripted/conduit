@@ -4,8 +4,11 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Conduit\Client\LLMClient;
 use Conduit\Entity\Content;
+use Conduit\Entity\JsonSchema;
+use Conduit\Enum\JsonSchemaType;
+use Conduit\Entity\Tool;
 
-$sAPIKey = getenv('MISTRAL_API_KEY');
+$sAPIKey = '';
 
 $oLLMClient = new LLMClient($sAPIKey);
 
@@ -14,20 +17,17 @@ $oChat = $oLLMClient->chat();
 $oChat
     ->model('mistral-small-latest')
     ->maxTokens(2000)
-    ->instruction('You extract structured data from text. Answer only with the requested JSON.')
+    ->instruction('You extract structured data from text.')
     ->content([
-        Content::text('Lorenz is 19 years old and lives in Germany.'),
+        Content::text('Generate a Long- and Short description about this article and give the price:  https://www.adidas.de/adizero-adios-pro-evo-3-schuh/KH7678.html?pr=taxonomy_rr&slot=1&rec=mt.'),
     ])
-    ->jsonSchema([
-        'type' => 'object',
-        'properties' => [
-            'name' => ['type' => 'string'],
-            'age' => ['type' => 'integer'],
-            'country_code' => ['type' => 'string'],
-        ],
-        'required' => ['name', 'age', 'country_code'],
-        'additionalProperties' => false,
-    ]);
+    ->tools([Tool::webSearch(['adidas.de'])])
+    ->jsonSchema(
+        JsonSchema::object()
+            ->property('description_long', JsonSchemaType::String)
+            ->property('description_short', JsonSchemaType::String)
+            ->property('price', JsonSchemaType::Number)
+    );
 
 $oResponse = $oChat->call();
 
@@ -36,7 +36,7 @@ if ($oResponse->hasErrors()) {
     exit(1);
 }
 
-echo $oResponse->getText(), "\n";
-
-$aData = json_decode($oResponse->getText(), true);
-var_dump($aData);
+$sJson = $oResponse->getJson();
+$aWebs = $oResponse->getWebSearches();
+var_dump($sJson);
+var_dump($aWebs);

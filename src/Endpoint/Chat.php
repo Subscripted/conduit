@@ -2,6 +2,7 @@
 
 namespace Conduit\Endpoint;
 
+use Conduit\Entity\JsonSchema;
 use Conduit\Enum\ThinkingEffort;
 use Conduit\Exception\ConduitException;
 use Conduit\Factory\AdapterFactory;
@@ -152,12 +153,13 @@ class Chat extends AbstractLLMEndpoint
     /**
      * Forces a JSON schema as the response format (structured outputs).
      *
-     * @param array $aSchema Full JSON schema (type, properties, required, additionalProperties).
+     * @param array|JsonSchema $mSchema Full JSON schema (type, properties, required,
+     *                                  additionalProperties), or a JsonSchema::object() builder.
      * @return self
      */
-    public function jsonSchema(array $aSchema): self
+    public function jsonSchema(array|JsonSchema $mSchema): self
     {
-        $this->aJsonSchema = $aSchema;
+        $this->aJsonSchema = $mSchema instanceof JsonSchema ? $mSchema->build() : $mSchema;
         return $this;
     }
 

@@ -12,6 +12,7 @@ namespace Conduit\Enum;
 enum OutputType: string
 {
     case Text               = 'text';
+    case Json               = 'json';
     case FunctionCall       = 'function_call';
     case WebSearch          = 'web_search';
     case WebFetch           = 'web_fetch';

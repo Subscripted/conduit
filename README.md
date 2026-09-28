@@ -104,7 +104,7 @@ Only `call()` performs the HTTP request.
 | `user(string)` | Role of the current turn (`user` / `assistant`). OpenAI and Mistral only. | `user` |
 | `maxTokens(int)` | Answer length cap. | `1024` |
 | `effort(ThinkingEffort, bool $summary = false)` | Reasoning depth; optionally ask for a summary. | `Low` |
-| `jsonSchema(array)` | Force a JSON Schema on the answer. | none |
+| `jsonSchema(array\|JsonSchema)` | Force a JSON Schema on the answer — a raw array or a `JsonSchema::object()...` builder. | none |
 | `tools(array)` / `addTool(array)` | Tools from `Tool::…`. | `[]` |
 | `clearContext()` / `clearContent()` | Reset for reuse of the same object. | — |
 
@@ -176,7 +176,7 @@ All tool definitions come from the `Conduit\Entity\Tool` factory. The neutral
 | `effort()` + thinking summary | ✅ | ✅ | partial | Mistral maps `effort()` to `reasoning_effort`; the thinking-summary flag has no Mistral equivalent |
 | function-call round-trip (`Context::tool()`) | ✅ | ✅ | ✅ | |
 | retry + backoff on `429` / `5xx` | ✅ | ✅ | ✅ | shared in `AbstractLLMAdapter` |
-| `jsonSchema()` structured output | ❌ | ✅ | ✅ | not yet wired in the OpenAI adapter — the schema is dropped |
+| `jsonSchema()` structured output | ✅ | ✅ | ✅ | |
 | `user()` role override | ✅ | ❌ | ✅ | Anthropic always sends the turn as `user` |
 | `Context::mcpApproval()` | ✅ | ❌ | ❌ | only OpenAI's MCP connector has an approval step |
 
@@ -286,22 +286,42 @@ foreach ($response->getImages() as $image) {
 
 ## Structured output
 
+`jsonSchema()` takes a raw JSON Schema array, or a `JsonSchema` builder for
+when the schema itself is built in code instead of typed out by hand:
+
 ```php
+use Conduit\Entity\JsonSchema;
+use Conduit\Enum\JsonSchemaType;
+
 $response = $client->chat()
     ->model('gpt-5')
     ->content([Content::text('Extract name and age: "Tom is 40."')])
-    ->jsonSchema([
-        'type'                 => 'object',
-        'properties'           => [
-            'name' => ['type' => 'string'],
-            'age'  => ['type' => 'integer'],
-        ],
-        'required'             => ['name', 'age'],
-        'additionalProperties' => false,
-    ])
+    ->jsonSchema(
+        JsonSchema::object()
+            ->property('name', JsonSchemaType::String)
+            ->property('age', JsonSchemaType::Integer)
+    )
     ->call();
 
-$data = json_decode($response->getText(), true);   // ['name' => 'Tom', 'age' => 40]
+$data = $response->getJson();   // ['name' => 'Tom', 'age' => 40]
+```
+
+`property()` takes a `JsonSchemaType` for a plain scalar field — no need for a
+`JsonSchema::string()`-style sub-builder unless the property itself nests
+(object, array) or needs its own enum/description, in which case pass a full
+`JsonSchema` instance instead. `additionalProperties` defaults to `false` and
+`property()` marks a property required by default — the strict-mode shape
+OpenAI and Mistral enforce for structured outputs. Nest schemas for
+objects/arrays (`JsonSchema::array(JsonSchema::string())`), or pass a plain
+array to `jsonSchema()` directly if you already have one.
+
+A property that may genuinely not be derivable from the input should stay
+`required` but get `bNullable: true` — otherwise the model can't say "not
+present" and tends to guess a value that merely fits the type instead:
+
+```php
+->property('country_code', JsonSchemaType::String, bNullable: true)
+// -> {"type": ["string", "null"]}, still listed in `required`
 ```
 
 ## Reasoning effort
@@ -352,6 +372,7 @@ A `ChatResponse` is a sequence of `ChatOutput` blocks, not a single string.
 ```php
 $response->getText();          // first text block
 $response->getTexts();         // all text blocks
+$response->getJson();          // decoded structured answer, from jsonSchema()
 $response->getOutputs();       // every block, in order
 $response->getFunctionCalls(); // ChatOutput[] where isFunctionCall()
 $response->getMcpCalls();      // ChatOutput[] where isMcpCall()
@@ -379,7 +400,7 @@ foreach ($response->getOutputs() as $block) {
 }
 ```
 
-`Conduit\Enum\OutputType` is the full list: `Text`, `FunctionCall`, `WebSearch`,
+`Conduit\Enum\OutputType` is the full list: `Text`, `Json`, `FunctionCall`, `WebSearch`,
 `WebFetch`, `Image`, `Refusal`, `Thinking`, `McpCall`, `McpResult`,
 `McpListTools`, `McpApprovalRequest`.
 
@@ -482,7 +503,8 @@ src/
   Contract/    LLMAdapter, Castable, Hydratable, Output, ErrorCollectionInterface
   Endpoint/    AbstractLLMEndpoint, Chat, Image
   Entity/      Content, Context, Tool          (stateless request-building factories)
-  Enum/        AIProvider, ThinkingEffort, OutputType, ToolType
+               JsonSchema                      (fluent structured-output schema builder)
+  Enum/        AIProvider, ThinkingEffort, OutputType, ToolType, JsonSchemaType
   Exception/   ConduitException + concrete types
   Factory/     AdapterFactory
   Response/    AbstractAIResponse, ChatResponse, ChatOutput, ImageResponse, ImageOutput

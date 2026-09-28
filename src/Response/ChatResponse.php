@@ -38,6 +38,20 @@ class ChatResponse extends AbstractAIResponse
     }
 
     /**
+     * @return array Decoded structured answer requested via Chat::jsonSchema(),
+     *               [] when the response has none.
+     */
+    public function getJson(): array
+    {
+        foreach ($this->aOutputs as $oOutput) {
+            if ($oOutput instanceof ChatOutput && $oOutput->isJson()) {
+                return $oOutput->getJson();
+            }
+        }
+        return [];
+    }
+
+    /**
      * All text blocks of the response — the objects, not their strings
      * (ChatOutput has a __toString(), so implode() still yields the text).
      *

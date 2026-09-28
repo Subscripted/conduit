@@ -44,6 +44,9 @@ class ChatOutput implements Output
     /** @return string Text of the block, empty for every other type. */
     public function getText(): string        { return $this->sText; }
 
+    /** @return array Decoded structured answer (OutputType::Json only), empty when it isn't valid JSON. */
+    public function getJson(): array         { return json_decode($this->sText, true) ?? []; }
+
     /** @return array Source citations the provider adds on web search / web fetch, empty otherwise. */
     public function getAnnotations(): array  { return $this->aAnnotations; }
 
@@ -81,6 +84,9 @@ class ChatOutput implements Output
 
     /** @return bool True when this block is plain text. */
     public function isText(): bool         { return $this->oType === OutputType::Text; }
+
+    /** @return bool True when this block is the structured answer requested via Chat::jsonSchema(). */
+    public function isJson(): bool         { return $this->oType === OutputType::Json; }
 
     /** @return bool True when the model requested a custom function call. */
     public function isFunctionCall(): bool { return $this->oType === OutputType::FunctionCall; }
@@ -171,7 +177,8 @@ class ChatOutput implements Output
     public function __toString(): string
     {
         return match ($this->oType) {
-            OutputType::Text      => $this->sText,
+            OutputType::Text,
+            OutputType::Json      => $this->sText,
             OutputType::Refusal   => $this->sRefusal,
             OutputType::Thinking  => $this->sThinking,
             OutputType::McpResult => $this->sMcpOutput,
