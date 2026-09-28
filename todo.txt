@@ -1,2 +1,2 @@
-add JsonSchma Builder 
+add JsonSchma Builder (OpenAI JsonFormat)
 add Streaming 
