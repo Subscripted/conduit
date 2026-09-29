@@ -95,6 +95,7 @@ $response = $client->chat()
     ->model('claude-opus-5')            // 'claude-...' → Anthropic
     ->instruction('You answer in one sentence.')
     ->content([Content::text('Why is the sky blue?')])
+    ->maxTokens(200)
     ->call();
 
 echo $response;            // first text block — ChatResponse has __toString()
@@ -106,6 +107,7 @@ $response = (new LLMClient($openAiKey))
     ->model('gpt-5')                    // 'gpt-...' → OpenAI
     ->instruction('You answer in one sentence.')
     ->content([Content::text('Why is the sky blue?')])
+    ->maxTokens(200)
     ->call();
 ```
 
@@ -120,6 +122,7 @@ $response = $client->chat()
     ->model('my-custom-deployment')
     ->provider(AIProvider::OpenAI)
     ->content([Content::text('hi')])
+    ->maxTokens(200)
     ->call();
 ```
 
@@ -138,7 +141,7 @@ Only `call()` performs the HTTP request.
 | `content(array)` | The user turn — blocks from `Content::…`. | `[]` |
 | `context(array)` | Prior turns — messages from `Context::…`. | `[]` |
 | `user(string)` | Role of the current turn (`user` / `assistant`). OpenAI and Mistral only. | `user` |
-| `maxTokens(int)` | Answer length cap. | `1024` |
+| `maxTokens(int)` | Answer length cap. **Required** — `call()` throws `ConfigurationException` if never set; Conduit doesn't pick a default for something that affects both cost and answer length. | — |
 | `effort(ThinkingEffort, bool $summary = false)` | Reasoning depth; optionally ask for a summary. | `Low` |
 | `jsonSchema(array\|JsonSchema)` | Force a JSON Schema on the answer — a raw array or a `JsonSchema::object()...` builder. | none |
 | `tools(array)` / `addTool(array)` | Tools from `Tool::…`. | `[]` |
@@ -161,6 +164,7 @@ $response = $client->chat()
     ->model('claude-opus-5')
     ->context($history)
     ->content([Content::text('And of Spain?')])
+    ->maxTokens(200)
     ->call();
 ```
 
@@ -177,6 +181,7 @@ $client->chat()
         Content::image('data:image/png;base64,iVBORw0KGgo...'),   // data URI works too
         Content::file('https://example.com/report.pdf'),
     ])
+    ->maxTokens(500)
     ->call();
 ```
 
@@ -240,6 +245,7 @@ $response = $client->chat()
             'required'   => ['city'],
         ]),
     ])
+    ->maxTokens(200)
     ->call();
 
 foreach ($response->getFunctionCalls() as $call) {
@@ -254,6 +260,7 @@ foreach ($response->getFunctionCalls() as $call) {
             Context::tool($call->getCallId(), $result),
         ])
         ->content([Content::text('')])
+        ->maxTokens(200)
         ->call();
 }
 ```
@@ -268,6 +275,7 @@ $client->chat()
         Tool::webSearch(aAllowedDomains: ['reuters.com', 'apnews.com'], iMaxUses: 3),
         Tool::webFetch(bCitations: true),
     ])
+    ->maxTokens(500)
     ->call();
 ```
 
@@ -292,6 +300,7 @@ $response = $client->chat()
             sAuthorizationToken: $oauthToken,
         ),
     ])
+    ->maxTokens(500)
     ->call();
 
 foreach ($response->getMcpCalls() as $call) {
@@ -315,6 +324,7 @@ $response = $client->chat()
     ->model('gpt-5')
     ->content([Content::text('Draw a red bicycle.')])
     ->tools([Tool::imageGeneration(iWidth: 1024, iHeight: 1024)])
+    ->maxTokens(200)
     ->call();
 
 foreach ($response->getImages() as $image) {
@@ -341,6 +351,7 @@ $response = $client->chat()
             ->property('name', JsonSchemaType::String)
             ->property('age', JsonSchemaType::Integer)
     )
+    ->maxTokens(200)
     ->call();
 
 $data = $response->getJson();   // ['name' => 'Tom', 'age' => 40]
@@ -373,6 +384,7 @@ $response = $client->chat()
     ->model('claude-opus-5')
     ->effort(ThinkingEffort::High, bSummary: true)
     ->content([Content::text('Prove that sqrt(2) is irrational.')])
+    ->maxTokens(2000)
     ->call();
 
 foreach ($response->getOutputs() as $block) {
@@ -459,6 +471,7 @@ $response = $client->chat()
     ->model('mistral-small-latest')
     ->content([Content::text('What is the weather in Berlin?')])
     ->tools([Tool::webSearch()])   // Mistral adapter doesn't translate this (yet)
+    ->maxTokens(500)
     ->call();
 
 if ($response->hasWarnings()) {
@@ -481,7 +494,7 @@ if ($response->hasWarnings()) {
 Provider-side failures never throw out of `call()` — they land in the response:
 
 ```php
-$response = $client->chat()->model('claude-opus-5')->content([Content::text('hi')])->call();
+$response = $client->chat()->model('claude-opus-5')->content([Content::text('hi')])->maxTokens(200)->call();
 
 if ($response->hasErrors()) {
     $e = $response->getFirstError();               // the Throwable itself

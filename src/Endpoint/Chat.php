@@ -5,6 +5,7 @@ namespace Conduit\Endpoint;
 use Conduit\Entity\JsonSchema;
 use Conduit\Enum\ThinkingEffort;
 use Conduit\Exception\ConduitException;
+use Conduit\Exception\ConfigurationException;
 use Conduit\Factory\AdapterFactory;
 use Conduit\Response\ChatResponse;
 use Conduit\Support\HasTools;
@@ -29,7 +30,7 @@ class Chat extends AbstractLLMEndpoint
     private array          $aContent       = [];
     private string         $sInstruction   = '';
     private string         $sUser          = 'user';
-    private int            $iMaxTokens     = 1024;
+    private int            $iMaxTokens     = 0;
     private ThinkingEffort $oEffort        = ThinkingEffort::Low;
     private bool           $bEffortSummary = false;
     private array          $aJsonSchema    = [];
@@ -39,12 +40,21 @@ class Chat extends AbstractLLMEndpoint
      *
      * A provider error is deliberately not propagated but returned as a
      * ChatResponse with an error set — the caller checks hasErrors() instead
-     * of catching.
+     * of catching. maxTokens() not being set is different: it's a programmer
+     * error like an empty API key or an unresolvable model, not something a
+     * caller should branch on at runtime, so it throws eagerly instead.
      *
      * @return ChatResponse Model answer or error response.
+     * @throws ConfigurationException If maxTokens() was never called — Conduit does not
+     *                                 pick a default for a value that affects both cost
+     *                                 and answer length, that decision is yours to make.
      */
     public function call(): ChatResponse
     {
+        if ($this->iMaxTokens <= 0) {
+            throw new ConfigurationException('maxTokens() must be set explicitly before calling call().');
+        }
+
         $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oConfig, $this->oProviderOverride);
 
         try {
@@ -116,7 +126,9 @@ class Chat extends AbstractLLMEndpoint
     }
 
     /**
-     * Limits the length of the answer (default 1024).
+     * Limits the length of the answer. Required — call() throws a
+     * ConfigurationException if this was never set, rather than silently
+     * picking a value that affects both cost and answer length for you.
      *
      * @param int $iMaxTokens Maximum number of answer tokens.
      * @return self
