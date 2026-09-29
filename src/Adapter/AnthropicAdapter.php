@@ -2,7 +2,10 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Configuration\ConduitConfig;
 use Conduit\Enum\ToolType;
+use Conduit\Exception\ApiException;
+use Conduit\Exception\TransportException;
 use Conduit\Exception\UnsupportedCapabilityException;
 
 /**
@@ -50,10 +53,12 @@ class AnthropicAdapter extends AbstractLLMAdapter
     private array $aRequestBetas = [];
 
     /**
-     * @param string $sApiKey API key of the Anthropic account.
+     * @param string        $sApiKey API key of the Anthropic account.
+     * @param ConduitConfig $oConfig Timeouts, retry policy and warnings toggle.
      */
-    public function __construct(private readonly string $sApiKey)
+    public function __construct(private readonly string $sApiKey, ConduitConfig $oConfig)
     {
+        parent::__construct($oConfig);
     }
 
     /**
@@ -91,12 +96,13 @@ class AnthropicAdapter extends AbstractLLMAdapter
      *
      * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
      *                        content, tools, jsonSchema, effort, effortSummary.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
-     * @throws \Conduit\Exception\TransportException|\Conduit\Exception\ApiException If the HTTP request or the API fails.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
+     * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
     public function chat(array $aPayload): array
     {
         $this->aRequestBetas = [];
+        $this->resetWarnings();
 
         $aBody = [
             'model' => $aPayload['model'],
@@ -268,8 +274,9 @@ class AnthropicAdapter extends AbstractLLMAdapter
      * including the `mcp_toolset` half of an MCP connection. The connection
      * details themselves go into a top-level `mcp_servers` key, built by
      * buildMcpServers(). The built-in tools carry a dated type tag pinned in
-     * the WEB_SEARCH_TYPE / WEB_FETCH_TYPE constants. image_generation is
-     * skipped silently.
+     * the WEB_SEARCH_TYPE / WEB_FETCH_TYPE constants. Every tool this method
+     * can't build (image_generation, an MCP tool without a url, an unknown
+     * type) is recorded via warn() rather than silently vanishing.
      *
      * @param array $aTools Tool definitions from Tool::webSearch(), ::webFetch(), ::function(), ::mcp().
      * @return array Tools in the Anthropic format, empty when none is supported.
@@ -331,6 +338,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
                     // those neutral fields are ignored. allowed_tools becomes an
                     // allowlist: everything off by default, listed tools back on.
                     if (empty($aTool['url'])) {
+                        $this->warn("MCP tool '{$aTool['name']}' has no url and was skipped.");
                         break;
                     }
                     $aBuilt = ['type' => 'mcp_toolset', 'mcp_server_name' => $aTool['name']];
@@ -340,6 +348,14 @@ class AnthropicAdapter extends AbstractLLMAdapter
                             $aBuilt['configs'][$sToolName] = ['enabled' => true];
                         }
                     }
+                    break;
+
+                case ToolType::ImageGeneration->value:
+                    $this->warn('Tool::imageGeneration() is not supported by Anthropic and was skipped.');
+                    break;
+
+                default:
+                    $this->warn("Unknown tool type '{$sType}' was skipped.");
                     break;
             }
             if ($aBuilt !== null) {
@@ -389,7 +405,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
      * @param array $aRaw           Decoded JSON answer of the Messages API.
      * @param bool  $bJsonRequested Whether the request carried a jsonSchema — a text block is
      *                              then the structured answer and normalizes to type 'json'.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     private function normalizeResponse(array $aRaw, bool $bJsonRequested = false): array
     {
@@ -463,6 +479,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
             'output_tokens' => $aRaw['usage']['output_tokens'] ?? 0,
             'outputs' => $aOutputs,
             'errors' => [],
+            'warnings' => $this->getWarnings(),
         ];
     }
 

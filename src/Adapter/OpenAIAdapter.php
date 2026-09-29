@@ -2,6 +2,7 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Configuration\ConduitConfig;
 use Conduit\Enum\ToolType;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -22,9 +23,13 @@ class OpenAIAdapter extends AbstractLLMAdapter
     private const string BASE_URL = 'https://api.openai.com/v1';
 
     /**
-     * @param string $sApiKey API key of the OpenAI account.
+     * @param string        $sApiKey API key of the OpenAI account.
+     * @param ConduitConfig $oConfig Timeouts, retry policy and warnings toggle.
      */
-    public function __construct(private readonly string $sApiKey) {}
+    public function __construct(private readonly string $sApiKey, ConduitConfig $oConfig)
+    {
+        parent::__construct($oConfig);
+    }
 
     /**
      * Provider-specific headers for every request.
@@ -41,11 +46,13 @@ class OpenAIAdapter extends AbstractLLMAdapter
      *
      * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
      *                        content, user, tools, effort, effortSummary, jsonSchema.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
     public function chat(array $aPayload): array
     {
+        $this->resetWarnings();
+
         $aBody = [
             'model' => $aPayload['model'],
             'input' => $this->buildInput($aPayload),
@@ -90,11 +97,13 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * both cases. For pure text-to-image requests, switch to /images/generations.
      *
      * @param array $aPayload Neutral payload: model, prompt, images, width, height, quality, outputFormat.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
     public function image(array $aPayload): array
     {
+        $this->resetWarnings();
+
         $aBody = [
             'model'  => $aPayload['model'],
             'prompt' => $aPayload['prompt'],
@@ -246,7 +255,8 @@ class OpenAIAdapter extends AbstractLLMAdapter
     /**
      * Translates the neutral tool definitions into the OpenAI format.
      * Optional values are only set when filled so the API uses its own
-     * defaults. Unknown tool types are silently skipped.
+     * defaults. A tool type this method can't build (webFetch(), an unknown
+     * type) is recorded via warn() rather than silently vanishing.
      *
      * @param array $aTools Tool definitions from Tool::webSearch(), ::function(),
      *                      ::imageGeneration() and ::mcp().
@@ -346,6 +356,14 @@ class OpenAIAdapter extends AbstractLLMAdapter
                         $aBuilt['allowed_tools'] = $aTool['allowed_tools'];
                     }
                     break;
+
+                case ToolType::WebFetch->value:
+                    $this->warn('Tool::webFetch() is not supported by OpenAI (folded into webSearch()) and was skipped.');
+                    break;
+
+                default:
+                    $this->warn("Unknown tool type '{$sType}' was skipped.");
+                    break;
             }
 
             if ($aBuilt !== null) {
@@ -366,7 +384,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * @param array $aRaw           Decoded JSON answer of the Responses API.
      * @param bool  $bJsonRequested Whether the request carried a jsonSchema — an output_text
      *                              block is then the structured answer and normalizes to type 'json'.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     private function normalizeResponse(array $aRaw, bool $bJsonRequested = false): array
     {
@@ -460,6 +478,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
             'output_tokens' => $aRaw['usage']['output_tokens'] ?? 0,
             'outputs'       => $aOutputs,
             'errors'        => [],
+            'warnings'      => $this->getWarnings(),
         ];
     }
 
@@ -580,7 +599,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
      * ImageResponse.
      *
      * @param array $aRaw Decoded JSON answer of the Images API.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     private function normalizeImageResponse(array $aRaw): array
     {
@@ -602,6 +621,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
             'output_tokens' => $aRaw['usage']['output_tokens'] ?? 0,
             'outputs'       => $aOutputs,
             'errors'        => [],
+            'warnings'      => $this->getWarnings(),
         ];
     }
 }

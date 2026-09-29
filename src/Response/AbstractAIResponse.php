@@ -6,23 +6,31 @@ use Conduit\Contract\Castable;
 use Conduit\Contract\ErrorCollectionInterface;
 use Conduit\Contract\Hydratable;
 use Conduit\Contract\Output;
+use Conduit\Contract\WarningCollectionInterface;
 use Conduit\Support\HasErrors;
+use Conduit\Support\HasWarnings;
 use Throwable;
 
 /**
  * Base for every response object (ChatResponse, ImageResponse).
  *
  * Holds the fields that every request produces: model, token usage, the
- * individual model outputs and any errors. Data arrives as the normalized
- * array from the adapter; hydrateFromArray() fills it, the concrete class
- * decides in hydrateOutput() which Output class the entries become.
+ * individual model outputs, any errors and any warnings. Data arrives as the
+ * normalized array from the adapter; hydrateFromArray() fills it, the
+ * concrete class decides in hydrateOutput() which Output class the entries
+ * become.
  *
  * Errors do not throw, they land in $aErrors as Throwable objects — always
- * check hasErrors() before evaluating the outputs.
+ * check hasErrors() before evaluating the outputs. Warnings are a separate,
+ * non-fatal concept: they mean part of the neutral payload (an unsupported
+ * tool type, ...) couldn't be translated for this provider and was skipped —
+ * the response is still a normal, usable answer, check hasWarnings() to find
+ * out what silently didn't happen.
  */
-abstract class AbstractAIResponse implements Castable, Hydratable, ErrorCollectionInterface
+abstract class AbstractAIResponse implements Castable, Hydratable, ErrorCollectionInterface, WarningCollectionInterface
 {
     use HasErrors;
+    use HasWarnings;
 
     /** @var Output[] */
     protected array  $aOutputs      = [];
@@ -55,7 +63,7 @@ abstract class AbstractAIResponse implements Castable, Hydratable, ErrorCollecti
      * Fills the shared fields from the normalized adapter array. Called by
      * the fromArray() implementation of each concrete response class.
      *
-     * @param array $aData Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @param array $aData Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     protected function hydrateFromArray(array $aData): void
     {
@@ -66,6 +74,9 @@ abstract class AbstractAIResponse implements Castable, Hydratable, ErrorCollecti
             if ($oError instanceof Throwable) {
                 $this->addError($oError);
             }
+        }
+        foreach ($aData['warnings'] ?? [] as $sWarning) {
+            $this->addWarning((string) $sWarning);
         }
         foreach ($aData['outputs'] ?? [] as $aOutputData) {
             $this->aOutputs[] = $this->hydrateOutput($aOutputData);
@@ -104,7 +115,7 @@ abstract class AbstractAIResponse implements Castable, Hydratable, ErrorCollecti
      * logging). Errors are rendered as their messages so the array stays
      * JSON-serialisable; use getErrors() for the Throwable objects.
      *
-     * @return array model, input_tokens, output_tokens, outputs, errors.
+     * @return array model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     public function __toArray(): array
     {
@@ -118,6 +129,7 @@ abstract class AbstractAIResponse implements Castable, Hydratable, ErrorCollecti
             'output_tokens' => $this->iOutputTokens,
             'outputs'       => $aOutputs,
             'errors'        => $this->getErrorMessages(),
+            'warnings'      => $this->getWarnings(),
         ];
     }
 }

@@ -45,7 +45,7 @@ class Chat extends AbstractLLMEndpoint
      */
     public function call(): ChatResponse
     {
-        $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oProviderOverride);
+        $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oConfig, $this->oProviderOverride);
 
         try {
             $aNormalized = $oAdapter->chat([

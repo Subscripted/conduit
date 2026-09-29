@@ -3,6 +3,7 @@
 require __DIR__ . '/../vendor/autoload.php';
 
 use Conduit\Client\LLMClient;
+use Conduit\Configuration\ConduitConfig;
 use Conduit\Entity\Content;
 use Conduit\Entity\JsonSchema;
 use Conduit\Enum\JsonSchemaType;
@@ -11,7 +12,6 @@ use Conduit\Entity\Tool;
 $sAPIKey = '';
 
 $oLLMClient = new LLMClient($sAPIKey);
-
 $oChat = $oLLMClient->chat();
 
 $oChat

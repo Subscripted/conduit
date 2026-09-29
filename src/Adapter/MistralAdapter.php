@@ -2,6 +2,7 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Configuration\ConduitConfig;
 use Conduit\Enum\ToolType;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -41,9 +42,13 @@ class MistralAdapter extends AbstractLLMAdapter
     private const string BASE_URL = 'https://api.mistral.ai/v1';
 
     /**
-     * @param string $sApiKey API key of the Mistral account.
+     * @param string        $sApiKey API key of the Mistral account.
+     * @param ConduitConfig $oConfig Timeouts, retry policy and warnings toggle.
      */
-    public function __construct(private readonly string $sApiKey) {}
+    public function __construct(private readonly string $sApiKey, ConduitConfig $oConfig)
+    {
+        parent::__construct($oConfig);
+    }
 
     /**
      * Provider-specific headers for every request.
@@ -72,11 +77,13 @@ class MistralAdapter extends AbstractLLMAdapter
      *
      * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
      *                        content, user, tools, effort, jsonSchema.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      * @throws TransportException|ApiException If the HTTP request or the API fails.
      */
     public function chat(array $aPayload): array
     {
+        $this->resetWarnings();
+
         $aBody = [
             'model'  => $aPayload['model'],
             'stream' => false,
@@ -241,7 +248,7 @@ class MistralAdapter extends AbstractLLMAdapter
      * Tool::function() is supported — the other neutral tool types describe
      * shapes (a URL-addressed MCP server, OpenAI-style web search params)
      * that don't correspond to Mistral's built-in connectors, so they are
-     * silently skipped rather than mistranslated.
+     * recorded via warn() and skipped rather than mistranslated.
      *
      * @param array $aTools Tool definitions from Tool::function() and others.
      * @return array Tools in the Mistral format, empty when none is supported.
@@ -250,7 +257,9 @@ class MistralAdapter extends AbstractLLMAdapter
     {
         $aResult = [];
         foreach ($aTools as $aTool) {
-            if (($aTool['_type'] ?? '') !== ToolType::Function->value) {
+            $sType = $aTool['_type'] ?? '';
+            if ($sType !== ToolType::Function->value) {
+                $this->warn("Tool type '{$sType}' is not supported by the Mistral adapter yet and was skipped.");
                 continue;
             }
             $aResult[] = [
@@ -281,7 +290,7 @@ class MistralAdapter extends AbstractLLMAdapter
      * @param string $sModel         Model id that was sent in the request.
      * @param bool   $bJsonRequested Whether the request carried a jsonSchema — a text chunk is
      *                               then the structured answer and normalizes to type 'json'.
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     private function normalizeResponse(array $aRaw, string $sModel, bool $bJsonRequested = false): array
     {
@@ -320,6 +329,7 @@ class MistralAdapter extends AbstractLLMAdapter
             'output_tokens' => $aRaw['usage']['completion_tokens'] ?? 0,
             'outputs'       => $aOutputs,
             'errors'        => [],
+            'warnings'      => $this->getWarnings(),
         ];
     }
 

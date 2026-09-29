@@ -2,6 +2,7 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Configuration\ConduitConfig;
 use Conduit\Contract\LLMAdapter;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -10,7 +11,8 @@ use Conduit\Exception\TransportException;
  * Base for every provider adapter (OpenAI, Anthropic).
  *
  * Handles the HTTP part that is the same for all providers: a cURL request
- * with a JSON body, timeouts and retries on transient failures. Each
+ * with a JSON body, timeouts and retries on transient failures, all driven
+ * by the injected ConduitConfig rather than hardcoded constants. Each
  * provider adapter only adds its own request body, its headers and the
  * normalization of the response on top of this.
  *
@@ -19,16 +21,54 @@ use Conduit\Exception\TransportException;
  */
 abstract class AbstractLLMAdapter implements LLMAdapter
 {
-    /** Requests with server tools (web search / web fetch) regularly run over a minute. */
-    private const int REQUEST_TIMEOUT = 300;
-    private const int CONNECT_TIMEOUT = 15;
+    /**
+     * @param ConduitConfig $oConfig Timeouts, retry policy and warnings toggle for this client.
+     */
+    public function __construct(protected readonly ConduitConfig $oConfig)
+    {
+    }
 
     /**
-     * Overload / rate limit on the provider side (529 overloaded_error, 429) and
-     * short-lived server errors are transient — retry with growing back-off.
+     * Warnings collected while building the current request — reset at the
+     * start of chat()/image() via resetWarnings(), read back into the
+     * normalized response's 'warnings' key at the end.
+     *
+     * @var string[]
      */
-    private const int MAX_ATTEMPTS = 3;
-    private const array RETRY_HTTP_CODES = [429, 500, 502, 503, 529];
+    private array $aWarnings = [];
+
+    /**
+     * Records that some part of the neutral payload couldn't be translated
+     * for this provider (an unsupported tool type, a malformed tool
+     * definition, ...) instead of silently dropping it without a trace.
+     * A no-op when the config disabled warnings.
+     *
+     * @param string $sMessage Human-readable reason, surfaced via getWarnings() on the response.
+     */
+    protected function warn(string $sMessage): void
+    {
+        if ($this->oConfig->isWarningsEnabled()) {
+            $this->aWarnings[] = $sMessage;
+        }
+    }
+
+    /**
+     * Clears warnings from a previous request. Call at the start of
+     * chat()/image() — defensive: adapters are built fresh per call today,
+     * but this keeps warn() safe if that ever changes.
+     */
+    protected function resetWarnings(): void
+    {
+        $this->aWarnings = [];
+    }
+
+    /**
+     * @return string[] Warnings collected while building the current request.
+     */
+    protected function getWarnings(): array
+    {
+        return $this->aWarnings;
+    }
 
     /**
      * Provider-specific HTTP headers (mostly authentication).
@@ -41,8 +81,8 @@ abstract class AbstractLLMAdapter implements LLMAdapter
     /**
      * Sends a JSON request to the provider and returns the decoded response.
      *
-     * On HTTP codes from RETRY_HTTP_CODES the call is retried up to
-     * MAX_ATTEMPTS times, the wait doubling each attempt (2, 4, 8 seconds).
+     * On HTTP codes from the config's retryHttpCodes the call is retried up
+     * to maxAttempts times, the wait doubling each attempt (2, 4, 8 seconds).
      *
      * @param string $sUrl     Full endpoint URL.
      * @param array  $aPayload Request body, sent as JSON.
@@ -65,8 +105,8 @@ abstract class AbstractLLMAdapter implements LLMAdapter
                 CURLOPT_POST           => true,
                 CURLOPT_POSTFIELDS     => $sJson,
                 CURLOPT_HTTPHEADER     => $this->buildHeaders(),
-                CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
-                CURLOPT_TIMEOUT        => self::REQUEST_TIMEOUT,
+                CURLOPT_CONNECTTIMEOUT => $this->oConfig->getConnectTimeout(),
+                CURLOPT_TIMEOUT        => $this->oConfig->getRequestTimeout(),
             ]);
 
             $sResponse  = curl_exec($oCurl);
@@ -80,8 +120,8 @@ abstract class AbstractLLMAdapter implements LLMAdapter
             $aDecoded = json_decode($sResponse, true);
 
             if ($iHttpCode >= 400) {
-                $bRetry = in_array($iHttpCode, self::RETRY_HTTP_CODES, true)
-                    && $iAttempt < self::MAX_ATTEMPTS;
+                $bRetry = in_array($iHttpCode, $this->oConfig->getRetryHttpCodes(), true)
+                    && $iAttempt < $this->oConfig->getMaxAttempts();
 
                 if (!$bRetry) {
                     throw ApiException::fromResponse(

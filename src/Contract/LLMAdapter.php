@@ -21,7 +21,7 @@ interface LLMAdapter
      *
      * @param array $aPayload Neutral chat payload (model, instruction, context,
      *                        content, tools, effort, jsonSchema, ...).
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      */
     public function chat(array $aPayload): array;
 
@@ -29,7 +29,7 @@ interface LLMAdapter
      * Sends an image request to the provider.
      *
      * @param array $aPayload Neutral image payload (model, prompt, images, width, height, ...).
-     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors.
+     * @return array Normalized response: model, input_tokens, output_tokens, outputs, errors, warnings.
      * @throws UnsupportedCapabilityException If the provider has no image endpoint.
      */
     public function image(array $aPayload): array;

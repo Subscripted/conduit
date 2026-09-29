@@ -180,9 +180,13 @@ All tool definitions come from the `Conduit\Entity\Tool` factory. The neutral
 | `user()` role override | ✅ | ❌ | ✅ | Anthropic always sends the turn as `user` |
 | `Context::mcpApproval()` | ✅ | ❌ | ❌ | only OpenAI's MCP connector has an approval step |
 
-A tool or field the active provider doesn't support is **dropped silently** — the
-request still runs, it just isn't sent. The `image()` endpoint is the one
-exception: on Anthropic and Mistral it returns an error response, it is not ignored.
+A whole tool the active provider can't translate at all (an unsupported
+`_type`, a malformed definition) is dropped from the request — but not
+silently: it's recorded as a warning, see `getWarnings()` below. A supported
+tool with an unsupported optional field (e.g. `user_location` on Mistral) still
+runs, just without that field — no warning for those. The `image()` endpoint is
+the one exception to all of this: on Anthropic and Mistral it returns an error
+response outright, nothing is dropped-and-warned.
 
 ### Custom functions
 
@@ -383,6 +387,7 @@ $response->getImages();
 $response->getModel();
 $response->getInputTokens();
 $response->getOutputTokens();
+$response->getWarnings();      // string[] — see "Warnings" below
 $response->__toArray();        // fully JSON-serialisable
 ```
 
@@ -403,6 +408,35 @@ foreach ($response->getOutputs() as $block) {
 `Conduit\Enum\OutputType` is the full list: `Text`, `Json`, `FunctionCall`, `WebSearch`,
 `WebFetch`, `Image`, `Refusal`, `Thinking`, `McpCall`, `McpResult`,
 `McpListTools`, `McpApprovalRequest`.
+
+---
+
+## Warnings
+
+A response can be a normal, usable answer and still carry warnings — they
+mean part of the request couldn't be translated for the resolved provider (a
+tool type it doesn't support, a malformed tool definition) and was skipped
+instead of silently vanishing:
+
+```php
+$response = $client->chat()
+    ->model('mistral-small-latest')
+    ->content([Content::text('What is the weather in Berlin?')])
+    ->tools([Tool::webSearch()])   // Mistral adapter doesn't translate this (yet)
+    ->call();
+
+if ($response->hasWarnings()) {
+    foreach ($response->getWarnings() as $sWarning) {
+        error_log($sWarning);
+        // "Tool type 'web_search' is not supported by the Mistral adapter yet and was skipped."
+    }
+}
+```
+
+| Method | Returns |
+| --- | --- |
+| `hasWarnings()` | `bool` |
+| `getWarnings()` | `string[]` |
 
 ---
 
@@ -445,9 +479,51 @@ The collection holds exception objects, not strings:
 | `ConfigurationException` | `InvalidArgumentException` | empty API key, or a model id `AIProvider::fromModel()` can't resolve (use `provider(...)` for those) |
 
 `TransportException` and `ApiException` on retryable statuses (`429`, `500`,
-`502`, `503`, `529`) are retried up to 3 times with exponential backoff before
-they surface. `ConfigurationException` is thrown eagerly — it's a programming
-error, fix the call site.
+`502`, `503`, `529` by default) are retried with exponential backoff before
+they surface — see [Configuration](#configuration) to change the statuses or
+attempt count. `ConfigurationException` is thrown eagerly — it's a
+programming error, fix the call site.
+
+---
+
+## Configuration
+
+Cross-cutting behaviour — timeouts, retry policy, whether warnings are
+collected at all — lives in `Conduit\Configuration\ConduitConfig`, built once
+per `LLMClient` and passed to `LLMClient`'s constructor. It is never a
+singleton: two clients (different API keys, different accounts) can carry
+different configs.
+
+```php
+use Conduit\Configuration\ConduitConfig;
+use Conduit\Client\LLMClient;
+
+$config = ConduitConfig::default()
+    ->maxAttempts(5)
+    ->requestTimeout(60)
+    ->warningsEnabled(false);
+
+$client = new LLMClient($apiKey, $config);
+```
+
+Every parameter is optional and defaults to the built-in value, so named
+arguments work just as well for a one-off config:
+
+```php
+$config = new ConduitConfig(iMaxAttempts: 5, bWarningsEnabled: false);
+```
+
+Omit the second constructor argument to get `ConduitConfig::default()`
+outright — every existing `new LLMClient($apiKey)` call keeps working
+unchanged.
+
+| Setter | Getter | Purpose | Default |
+| --- | --- | --- | --- |
+| `requestTimeout(int)` | `getRequestTimeout(): int` | Seconds to wait for the provider to answer. | `300` |
+| `connectTimeout(int)` | `getConnectTimeout(): int` | Seconds to wait for the TCP connection to establish. | `15` |
+| `maxAttempts(int)` | `getMaxAttempts(): int` | Attempts (incl. the first) before a retryable failure surfaces. | `3` |
+| `retryHttpCodes(array)` | `getRetryHttpCodes(): int[]` | HTTP codes treated as transient and retried. | `[429, 500, 502, 503, 529]` |
+| `warningsEnabled(bool)` | `isWarningsEnabled(): bool` | Whether adapters collect warnings at all (see [Warnings](#warnings)). | `true` |
 
 ---
 
@@ -500,7 +576,8 @@ No client, endpoint, entity or response code changes.
 src/
   Adapter/     AbstractLLMAdapter, OpenAIAdapter, AnthropicAdapter, MistralAdapter
   Client/      LLMClient
-  Contract/    LLMAdapter, Castable, Hydratable, Output, ErrorCollectionInterface
+  Configuration/ ConduitConfig
+  Contract/    LLMAdapter, Castable, Hydratable, Output, ErrorCollectionInterface, WarningCollectionInterface
   Endpoint/    AbstractLLMEndpoint, Chat, Image
   Entity/      Content, Context, Tool          (stateless request-building factories)
                JsonSchema                      (fluent structured-output schema builder)
@@ -508,7 +585,7 @@ src/
   Exception/   ConduitException + concrete types
   Factory/     AdapterFactory
   Response/    AbstractAIResponse, ChatResponse, ChatOutput, ImageResponse, ImageOutput
-  Support/     HasErrors, HasTools, HasImageData   (shared traits)
+  Support/     HasErrors, HasWarnings, HasTools, HasImageData   (shared traits)
 ```
 
 ---
