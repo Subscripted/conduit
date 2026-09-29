@@ -1,5 +1,41 @@
 # Conduit
 
+## The problem
+
+Every LLM provider — OpenAI, Anthropic, Mistral, ... — has its own request
+format, its own shape for tools, structured output and reasoning effort, and
+its own response format. Integrating directly against one (or several) of
+them by hand works at first, but carries real long-term risk as the app and
+the providers' APIs keep evolving:
+
+- **Vendor lock-in.** Code written straight against one provider's request/response
+  shape is expensive to move later — a pricing change, a deprecated model, an
+  outage, or a better model elsewhere means rewriting every call site, not
+  flipping a config value.
+- **Duplicated, drifting integration code.** Supporting several providers by
+  hand means N parallel implementations of "build a request", "parse tool
+  calls", "handle errors" — subtly different from day one, and guaranteed to
+  drift further apart as each provider's API evolves on its own schedule. A
+  bug fix or new feature has to be rediscovered and reapplied N times instead
+  of once.
+- **Provider details leaking into business logic.** Without a boundary,
+  call sites accumulate `if ($provider === ...)` branches for things as small
+  as how "force a tool call" is even spelled (a bare string for OpenAI and
+  Mistral, a nested object for Anthropic) — wire-format trivia ends up
+  entangled with the application logic it's supposed to support.
+- **Silent capability gaps.** Every provider supports a different subset of
+  features (tool-calling shapes, structured-output strictness, web search,
+  MCP, image generation). Hand-rolled integrations tend to discover the gaps
+  in production: a feature quietly works against one provider and silently
+  does nothing against another, because nobody re-audited all the code paths
+  after the last change.
+- **Rising cost per additional provider.** Every new provider multiplies the
+  surface area of hand-maintained, scattered logic instead of adding one more
+  adapter behind one interface — the Nth integration ends up costing about as
+  much as the first, not less.
+
+## What Conduit does
+
 A provider-neutral LLM SDK for PHP. You write one request; Conduit translates it
 into the wire format of whichever provider is active and normalizes the answer
 back into one shape. Swapping OpenAI for Anthropic is a one-line change and no
