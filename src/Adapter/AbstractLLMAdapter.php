@@ -22,9 +22,10 @@ use Conduit\Exception\TransportException;
 abstract class AbstractLLMAdapter implements LLMAdapter
 {
     /**
+     * @param string        $sApiKey API key of the provider account.
      * @param ConduitConfig $oConfig Timeouts, retry policy and warnings toggle for this client.
      */
-    public function __construct(protected readonly ConduitConfig $oConfig)
+    public function __construct(protected readonly string $sApiKey, protected readonly ConduitConfig $oConfig)
     {
     }
 

@@ -2,7 +2,6 @@
 
 namespace Conduit\Adapter;
 
-use Conduit\Configuration\ConduitConfig;
 use Conduit\Enum\ToolType;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -51,15 +50,6 @@ class AnthropicAdapter extends AbstractLLMAdapter
      * @var string[]
      */
     private array $aRequestBetas = [];
-
-    /**
-     * @param string        $sApiKey API key of the Anthropic account.
-     * @param ConduitConfig $oConfig Timeouts, retry policy and warnings toggle.
-     */
-    public function __construct(private readonly string $sApiKey, ConduitConfig $oConfig)
-    {
-        parent::__construct($oConfig);
-    }
 
     /**
      * Provider-specific headers for every request. anthropic-beta is added
@@ -204,20 +194,8 @@ class AnthropicAdapter extends AbstractLLMAdapter
             'role' => $aMessage['role'],
             'content' => is_string($mContent)
                 ? $mContent
-                : $this->transformContent($this->wrapIfSingleBlock($mContent)),
+                : $this->transformContent(array_is_list($mContent) ? $mContent : [$mContent]),
         ];
-    }
-
-    /**
-     * Wraps a single content block in a list so transformContent() can
-     * iterate over blocks uniformly.
-     *
-     * @param array $aContent A single block or already a list of blocks.
-     * @return array List of blocks.
-     */
-    private function wrapIfSingleBlock(array $aContent): array
-    {
-        return array_is_list($aContent) ? $aContent : [$aContent];
     }
 
     /**
