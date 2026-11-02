@@ -33,4 +33,18 @@ interface LLMAdapter
      * @throws UnsupportedCapabilityException If the provider has no image endpoint.
      */
     public function image(array $aPayload): array;
+
+    /**
+     * Sends a chat request to the provider and streams the answer.
+     *
+     * Same neutral payload as chat(); yields normalized stream-event arrays
+     * (the shape Conduit\Response\ChatStreamEvent::fromArray() consumes)
+     * instead of returning one final array. Unlike chat(), a transport or API
+     * failure is not caught here — it propagates from the generator so the
+     * caller (Chat::stream()) can turn it into a trailing error event.
+     *
+     * @param array $aPayload Neutral chat payload, same shape as chat().
+     * @return \Generator<array> Normalized stream events.
+     */
+    public function streamChat(array $aPayload): \Generator;
 }

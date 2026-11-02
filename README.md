@@ -131,7 +131,8 @@ $response = $client->chat()
 ## Building a request
 
 `chat()` returns a `Conduit\Endpoint\Chat` you configure with fluent setters.
-Only `call()` performs the HTTP request.
+Only `call()` / `stream()` perform the HTTP request — see
+[Streaming](#streaming) for the latter.
 
 | Setter | Purpose | Default |
 | --- | --- | --- |
@@ -211,6 +212,7 @@ All tool definitions come from the `Conduit\Entity\Tool` factory. The neutral
 | Feature | OpenAI | Anthropic | Mistral | Notes |
 | --- | :---: | :---: | :---: | --- |
 | `chat()` | ✅ | ✅ | ✅ | |
+| `stream()` | ✅ | ✅ | ✅ | returns a `Generator<ChatStreamEvent>` — see [Streaming](#streaming) |
 | `image()` endpoint | ✅ | ❌ | ❌ | Anthropic and Mistral return an error response (`UnsupportedCapabilityException`) |
 | `instruction()`, `context()`, `content()` | ✅ | ✅ | ✅ | |
 | image / file (PDF) input via `Content::` | ✅ | ✅ | ✅ | Mistral takes files as `document_url` |
@@ -459,6 +461,61 @@ foreach ($response->getOutputs() as $block) {
 
 ---
 
+## Streaming
+
+`stream()` sends the same request as `call()` but returns a `Generator` of
+`ChatStreamEvent` instead of waiting for the whole answer — for a typewriter
+UI, or to react to a tool call before the turn finishes.
+
+```php
+foreach ($client->chat()
+    ->model('claude-opus-5')
+    ->content([Content::text('Write a haiku about rain.')])
+    ->maxTokens(200)
+    ->stream() as $event) {
+
+    if ($event->isTextDelta()) {
+        echo $event->getDelta();                  // print as it arrives
+    } elseif ($event->isOutputDone()) {
+        $block = $event->getOutput();              // a normal ChatOutput — same class call() returns
+    } elseif ($event->isResponseDone()) {
+        echo "\n[{$event->getModel()}, {$event->getInputTokens()}+{$event->getOutputTokens()} tokens]\n";
+    } elseif ($event->isError()) {
+        error_log($event->getError()->getMessage());
+    }
+}
+```
+
+Every block type `call()` can produce streams too, not just text. A block
+that doesn't arrive incrementally (a web search, an MCP call, an image) still
+gets its own `isOutputDone()` event once the provider finishes it, carrying
+the same `ChatOutput` `call()` would have put in `getOutputs()` — streaming
+has full parity with the buffered response, it's just delivered as it happens.
+
+`ChatStreamEvent::getType()` (`Conduit\Enum\StreamEventType`):
+
+| Type | Meaning | Relevant getters |
+| --- | --- | --- |
+| `OutputStart` | a new output block began | `getIndex()`, `getOutputType()` |
+| `TextDelta` / `ThinkingDelta` / `RefusalDelta` / `FunctionCallArgumentsDelta` | an incremental fragment of the block at `getIndex()` | `getIndex()`, `getDelta()` |
+| `OutputDone` | one output block finished — fires once per block, so once per turn for a plain text answer, more than once if the model also called a tool | `getIndex()`, `getOutput(): ChatOutput` |
+| `ResponseDone` | the whole stream finished — last event unless `Error` fires instead | `getModel()`, `getInputTokens()`, `getOutputTokens()`, `getWarnings()` |
+| `Error` | a provider/transport failure ended the stream | `getError(): Throwable` |
+
+A provider error mid-stream never throws out of the `foreach` — same
+philosophy as `call()` returning a response with `hasErrors()` instead of
+throwing: it arrives as a trailing `Error` event, and the stream ends there.
+
+Unlike `call()`, a failed stream is **not retried**: once events have reached
+the caller, restarting the request could duplicate output already displayed.
+A `429`/`5xx` or transport failure that happens before any event was yielded
+still surfaces as that trailing `Error` event — retry the whole `stream()`
+call yourself if you want one.
+
+`image()` has no streaming counterpart.
+
+---
+
 ## Warnings
 
 A response can be a normal, usable answer and still carry warnings — they
@@ -613,8 +670,8 @@ of the answer into the array the response objects hydrate from.
 1. Add a case to `Conduit\Enum\AIProvider` and a matching pattern in its
    `PATTERNS` table so `fromModel()` can recognize that provider's model ids.
 2. Write `Conduit\Adapter\YourAdapter extends AbstractLLMAdapter` implementing
-   `chat()` and `image()` (throw `UnsupportedCapabilityException` from whichever
-   it can't serve).
+   `chat()`, `streamChat()` and `image()` (throw `UnsupportedCapabilityException`
+   from whichever it can't serve).
 3. Add the `match` arm in `Conduit\Factory\AdapterFactory`.
 
 No client, endpoint, entity or response code changes.
@@ -630,10 +687,10 @@ src/
   Endpoint/    AbstractLLMEndpoint, Chat, Image
   Entity/      Content, Context, Tool          (stateless request-building factories)
                JsonSchema                      (fluent structured-output schema builder)
-  Enum/        AIProvider, ThinkingEffort, OutputType, ToolType, JsonSchemaType
+  Enum/        AIProvider, ThinkingEffort, OutputType, StreamEventType, ToolType, JsonSchemaType
   Exception/   ConduitException + concrete types
   Factory/     AdapterFactory
-  Response/    AbstractAIResponse, ChatResponse, ChatOutput, ImageResponse, ImageOutput
+  Response/    AbstractAIResponse, ChatResponse, ChatOutput, ChatStreamEvent, ImageResponse, ImageOutput
   Support/     HasErrors, HasWarnings, HasTools, HasImageData   (shared traits)
 ```
 

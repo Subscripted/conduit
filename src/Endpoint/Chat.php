@@ -8,6 +8,7 @@ use Conduit\Exception\ConduitException;
 use Conduit\Exception\ConfigurationException;
 use Conduit\Factory\AdapterFactory;
 use Conduit\Response\ChatResponse;
+use Conduit\Response\ChatStreamEvent;
 use Conduit\Support\HasTools;
 
 /**
@@ -58,22 +59,60 @@ class Chat extends AbstractLLMEndpoint
         $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oConfig, $this->oProviderOverride);
 
         try {
-            $aNormalized = $oAdapter->chat([
-                'model'         => $this->sModel,
-                'effort'        => $this->oEffort->value,
-                'effortSummary' => $this->bEffortSummary,
-                'instruction'   => $this->sInstruction ?: null,
-                'maxTokens'     => $this->iMaxTokens,
-                'user'          => $this->sUser,
-                'context'       => $this->aContext,
-                'content'       => $this->aContent,
-                'tools'         => $this->getTools(),
-                'jsonSchema'    => $this->aJsonSchema,
-            ]);
+            $aNormalized = $oAdapter->chat($this->buildPayload());
             return ChatResponse::fromArray($aNormalized);
         } catch (ConduitException $oException) {
             return ChatResponse::fromError($oException);
         }
+    }
+
+    /**
+     * Sends the assembled request to the provider and streams the answer.
+     *
+     * Same maxTokens() requirement as call(). A provider error is likewise
+     * not thrown but yielded as a trailing ChatStreamEvent with
+     * isError() === true, so the caller checks that instead of catching.
+     *
+     * @return \Generator<ChatStreamEvent> Stream events, in order.
+     * @throws ConfigurationException If maxTokens() was never called.
+     */
+    public function stream(): \Generator
+    {
+        if ($this->iMaxTokens <= 0) {
+            throw new ConfigurationException('maxTokens() must be set explicitly before calling stream().');
+        }
+
+        $oAdapter = AdapterFactory::make($this->sModel, $this->sApiKey, $this->oConfig, $this->oProviderOverride);
+
+        try {
+            foreach ($oAdapter->streamChat($this->buildPayload()) as $aEvent) {
+                yield ChatStreamEvent::fromArray($aEvent);
+            }
+        } catch (ConduitException $oException) {
+            yield ChatStreamEvent::fromArray(['type' => 'error', 'error' => $oException]);
+        }
+    }
+
+    /**
+     * Assembles the neutral payload shared by call() and stream() from the
+     * fluent setters.
+     *
+     * @return array Neutral chat payload for LLMAdapter::chat() / streamChat().
+     */
+    private function buildPayload(): array
+    {
+        return [
+            'model'         => $this->sModel,
+            'effort'        => $this->oEffort->value,
+            'effortSummary' => $this->bEffortSummary,
+            'instruction'   => $this->sInstruction ?: null,
+            'maxTokens'     => $this->iMaxTokens,
+            'user'          => $this->sUser,
+            'context'       => $this->aContext,
+            'content'       => $this->aContent,
+            'tools'         => $this->getTools(),
+            'jsonSchema'    => $this->aJsonSchema,
+        ];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Enum\StreamEventType;
 use Conduit\Enum\ToolType;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -43,6 +44,40 @@ class OpenAIAdapter extends AbstractLLMAdapter
     {
         $this->resetWarnings();
 
+        $aBody = $this->buildChatBody($aPayload);
+
+        $aRaw = $this->request(self::BASE_URL . '/responses', $aBody);
+        return $this->normalizeResponse($aRaw, !empty($aPayload['jsonSchema']));
+    }
+
+    /**
+     * Sends a chat request to the Responses API and streams the answer.
+     *
+     * @param array $aPayload Neutral payload, same shape as chat().
+     * @return \Generator<array> Normalized stream events.
+     * @throws TransportException|ApiException If the HTTP request or the API fails.
+     */
+    public function streamChat(array $aPayload): \Generator
+    {
+        $this->resetWarnings();
+
+        $aBody          = $this->buildChatBody($aPayload);
+        $bJsonRequested = !empty($aPayload['jsonSchema']);
+
+        foreach ($this->requestStream(self::BASE_URL . '/responses', $aBody) as $aEvent) {
+            yield from $this->normalizeStreamEvent($aEvent, $bJsonRequested);
+        }
+    }
+
+    /**
+     * Builds the Responses API request body shared by chat() and streamChat().
+     *
+     * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
+     *                        content, user, tools, effort, effortSummary, jsonSchema.
+     * @return array Request body for POST /responses.
+     */
+    private function buildChatBody(array $aPayload): array
+    {
         $aBody = [
             'model' => $aPayload['model'],
             'input' => $this->buildInput($aPayload),
@@ -77,8 +112,7 @@ class OpenAIAdapter extends AbstractLLMAdapter
             ];
         }
 
-        $aRaw = $this->request(self::BASE_URL . '/responses', $aBody);
-        return $this->normalizeResponse($aRaw, !empty($aPayload['jsonSchema']));
+        return $aBody;
     }
 
     /**
@@ -369,84 +403,8 @@ class OpenAIAdapter extends AbstractLLMAdapter
         $aOutputs = [];
 
         foreach ($aRaw['output'] ?? [] as $aItem) {
-            switch ($aItem['type'] ?? '') {
-                case 'message':
-                    foreach ($aItem['content'] ?? [] as $aBlock) {
-                        $aOutputs[] = $this->normalizeMessageBlock($aBlock, $bJsonRequested);
-                    }
-                    break;
-
-                case 'function_call':
-                    $aOutputs[] = [
-                        'type'      => 'function_call',
-                        'name'      => $aItem['name'] ?? '',
-                        'call_id'   => $aItem['call_id'] ?? $aItem['id'] ?? '',
-                        'arguments' => $aItem['arguments'] ?? '{}',
-                    ];
-                    break;
-
-                case 'web_search_call':
-                    $aOutputs[] = [
-                        'type'   => 'web_search',
-                        'status' => $aItem['status'] ?? 'completed',
-                    ];
-                    break;
-
-                case 'mcp_call':
-                    $aOutputs[] = [
-                        'type'         => 'mcp_call',
-                        'name'         => $aItem['name'] ?? '',
-                        'server_label' => $aItem['server_label'] ?? '',
-                        'call_id'      => $aItem['id'] ?? '',
-                        'arguments'    => $aItem['arguments'] ?? '{}',
-                    ];
-                    // OpenAI bundles the result into the same item; split it
-                    // off into its own block so it reads the same as Anthropic.
-                    if (isset($aItem['output']) || !empty($aItem['error'])) {
-                        $aOutputs[] = [
-                            'type'       => 'mcp_result',
-                            'call_id'    => $aItem['id'] ?? '',
-                            'mcp_error'  => !empty($aItem['error']),
-                            'mcp_output' => $aItem['error'] ?? (string) ($aItem['output'] ?? ''),
-                        ];
-                    }
-                    break;
-
-                case 'mcp_list_tools':
-                    $aOutputs[] = [
-                        'type'         => 'mcp_list_tools',
-                        'server_label' => $aItem['server_label'] ?? '',
-                        'mcp_tools'    => array_map(
-                            static fn (array $aTool): string => $aTool['name'] ?? '',
-                            $aItem['tools'] ?? [],
-                        ),
-                    ];
-                    break;
-
-                case 'mcp_approval_request':
-                    $aOutputs[] = [
-                        'type'         => 'mcp_approval_request',
-                        'name'         => $aItem['name'] ?? '',
-                        'server_label' => $aItem['server_label'] ?? '',
-                        'call_id'      => $aItem['id'] ?? '',
-                        'arguments'    => $aItem['arguments'] ?? '{}',
-                    ];
-                    break;
-
-                case 'image_generation_call':
-                    $sResult    = $aItem['result'] ?? '';
-                    $aOutputs[] = $this->normalizeImageResult($sResult, $aItem['status'] ?? 'completed');
-                    break;
-
-                case 'reasoning':
-                    $sThinking = '';
-                    foreach ($aItem['summary'] ?? [] as $aSummary) {
-                        $sThinking .= $aSummary['text'] ?? '';
-                    }
-                    if ($sThinking !== '') {
-                        $aOutputs[] = ['type' => 'thinking', 'thinking' => $sThinking];
-                    }
-                    break;
+            foreach ($this->mapOutputItemToBlocks($aItem, $bJsonRequested) as $aBlock) {
+                $aOutputs[] = $aBlock;
             }
         }
 
@@ -458,6 +416,215 @@ class OpenAIAdapter extends AbstractLLMAdapter
             'errors'        => [],
             'warnings'      => $this->getWarnings(),
         ];
+    }
+
+    /**
+     * Translates one output item into zero or more neutral output blocks.
+     * Shared by normalizeResponse() (an item from the buffered response) and
+     * normalizeStreamEvent() (the same item, delivered whole via
+     * response.output_item.done) so the mapping rules live in exactly one
+     * place. A message item can unfold into several blocks (one per content
+     * part); an mcp_call item into two (the call plus its bundled result).
+     *
+     * @param array $aItem          One entry of the Responses API `output` array.
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — an output_text
+     *                              block is then the structured answer and normalizes to type 'json'.
+     * @return array Zero or more normalized output blocks.
+     */
+    private function mapOutputItemToBlocks(array $aItem, bool $bJsonRequested): array
+    {
+        $aBlocks = [];
+
+        switch ($aItem['type'] ?? '') {
+            case 'message':
+                foreach ($aItem['content'] ?? [] as $aBlock) {
+                    $aBlocks[] = $this->normalizeMessageBlock($aBlock, $bJsonRequested);
+                }
+                break;
+
+            case 'function_call':
+                $aBlocks[] = [
+                    'type'      => 'function_call',
+                    'name'      => $aItem['name'] ?? '',
+                    'call_id'   => $aItem['call_id'] ?? $aItem['id'] ?? '',
+                    'arguments' => $aItem['arguments'] ?? '{}',
+                ];
+                break;
+
+            case 'web_search_call':
+                $aBlocks[] = [
+                    'type'   => 'web_search',
+                    'status' => $aItem['status'] ?? 'completed',
+                ];
+                break;
+
+            case 'mcp_call':
+                $aBlocks[] = [
+                    'type'         => 'mcp_call',
+                    'name'         => $aItem['name'] ?? '',
+                    'server_label' => $aItem['server_label'] ?? '',
+                    'call_id'      => $aItem['id'] ?? '',
+                    'arguments'    => $aItem['arguments'] ?? '{}',
+                ];
+                // OpenAI bundles the result into the same item; split it
+                // off into its own block so it reads the same as Anthropic.
+                if (isset($aItem['output']) || !empty($aItem['error'])) {
+                    $aBlocks[] = [
+                        'type'       => 'mcp_result',
+                        'call_id'    => $aItem['id'] ?? '',
+                        'mcp_error'  => !empty($aItem['error']),
+                        'mcp_output' => $aItem['error'] ?? (string) ($aItem['output'] ?? ''),
+                    ];
+                }
+                break;
+
+            case 'mcp_list_tools':
+                $aBlocks[] = [
+                    'type'         => 'mcp_list_tools',
+                    'server_label' => $aItem['server_label'] ?? '',
+                    'mcp_tools'    => array_map(
+                        static fn (array $aTool): string => $aTool['name'] ?? '',
+                        $aItem['tools'] ?? [],
+                    ),
+                ];
+                break;
+
+            case 'mcp_approval_request':
+                $aBlocks[] = [
+                    'type'         => 'mcp_approval_request',
+                    'name'         => $aItem['name'] ?? '',
+                    'server_label' => $aItem['server_label'] ?? '',
+                    'call_id'      => $aItem['id'] ?? '',
+                    'arguments'    => $aItem['arguments'] ?? '{}',
+                ];
+                break;
+
+            case 'image_generation_call':
+                $aBlocks[] = $this->normalizeImageResult($aItem['result'] ?? '', $aItem['status'] ?? 'completed');
+                break;
+
+            case 'reasoning':
+                $sThinking = '';
+                foreach ($aItem['summary'] ?? [] as $aSummary) {
+                    $sThinking .= $aSummary['text'] ?? '';
+                }
+                if ($sThinking !== '') {
+                    $aBlocks[] = ['type' => 'thinking', 'thinking' => $sThinking];
+                }
+                break;
+        }
+
+        return $aBlocks;
+    }
+
+    // ── Stream normalizer ───────────────────────────────────────────────────
+
+    /**
+     * Translates one decoded SSE event of the Responses API stream into zero
+     * or more neutral stream events. response.output_item.done already
+     * carries the complete item — the same shape as a non-streaming `output[]`
+     * entry — so it's run through the same mapOutputItemToBlocks() used by
+     * normalizeResponse() instead of being reassembled from deltas.
+     *
+     * @param array $aData          Decoded JSON of one SSE event ('data:' line(s)).
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema.
+     * @return \Generator<array> Zero or more normalized stream events.
+     */
+    private function normalizeStreamEvent(array $aData, bool $bJsonRequested): \Generator
+    {
+        switch ($aData['type'] ?? '') {
+            case 'response.output_item.added':
+                yield [
+                    'type' => StreamEventType::OutputStart->value,
+                    'index' => $aData['output_index'] ?? 0,
+                    'output_type' => $this->hintOutputType($aData['item']['type'] ?? ''),
+                ];
+                break;
+
+            case 'response.output_text.delta':
+                yield [
+                    'type' => StreamEventType::TextDelta->value,
+                    'index' => $aData['output_index'] ?? 0,
+                    'delta' => $aData['delta'] ?? '',
+                ];
+                break;
+
+            case 'response.refusal.delta':
+                yield [
+                    'type' => StreamEventType::RefusalDelta->value,
+                    'index' => $aData['output_index'] ?? 0,
+                    'delta' => $aData['delta'] ?? '',
+                ];
+                break;
+
+            case 'response.function_call_arguments.delta':
+                yield [
+                    'type' => StreamEventType::FunctionCallArgumentsDelta->value,
+                    'index' => $aData['output_index'] ?? 0,
+                    'delta' => $aData['delta'] ?? '',
+                ];
+                break;
+
+            case 'response.reasoning_summary_text.delta':
+                yield [
+                    'type' => StreamEventType::ThinkingDelta->value,
+                    'index' => $aData['output_index'] ?? 0,
+                    'delta' => $aData['delta'] ?? '',
+                ];
+                break;
+
+            case 'response.output_item.done':
+                $iIndex = $aData['output_index'] ?? 0;
+                foreach ($this->mapOutputItemToBlocks($aData['item'] ?? [], $bJsonRequested) as $aBlock) {
+                    yield ['type' => StreamEventType::OutputDone->value, 'index' => $iIndex, 'output' => $aBlock];
+                }
+                break;
+
+            case 'response.completed':
+                $aResponse = $aData['response'] ?? [];
+                yield [
+                    'type' => StreamEventType::ResponseDone->value,
+                    'model' => $aResponse['model'] ?? '',
+                    'input_tokens' => $aResponse['usage']['input_tokens'] ?? 0,
+                    'output_tokens' => $aResponse['usage']['output_tokens'] ?? 0,
+                    'warnings' => $this->getWarnings(),
+                ];
+                break;
+
+            case 'response.failed':
+            case 'error':
+                $aError = $aData['response']['error'] ?? $aData['error'] ?? $aData;
+                yield [
+                    'type' => StreamEventType::Error->value,
+                    'error' => ApiException::fromResponse(0, json_encode($aError), ['error' => $aError]),
+                ];
+                break;
+        }
+    }
+
+    /**
+     * Maps an output item's `type` to the neutral OutputType value it will
+     * eventually become, for the OutputStart hint. A lightweight, explicit
+     * mapping rather than a reuse of mapOutputItemToBlocks() — at
+     * output_item.added time the item carries no content yet, so the full
+     * mapping (which needs it, e.g. for a message's content parts) can't run.
+     *
+     * @param string $sItemType Responses API item type (message, function_call, ...).
+     * @return string|null Neutral OutputType value, or null when unknown.
+     */
+    private function hintOutputType(string $sItemType): ?string
+    {
+        return match ($sItemType) {
+            'message' => 'text',
+            'function_call' => 'function_call',
+            'web_search_call' => 'web_search',
+            'mcp_call' => 'mcp_call',
+            'mcp_list_tools' => 'mcp_list_tools',
+            'mcp_approval_request' => 'mcp_approval_request',
+            'image_generation_call' => 'image',
+            'reasoning' => 'thinking',
+            default => null,
+        };
     }
 
     /**

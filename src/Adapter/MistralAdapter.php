@@ -2,6 +2,7 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Enum\StreamEventType;
 use Conduit\Enum\ToolType;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -41,6 +42,18 @@ class MistralAdapter extends AbstractLLMAdapter
     private const string BASE_URL = 'https://api.mistral.ai/v1';
 
     /**
+     * Accumulator for streamChat(), reset at the start of every call. The
+     * Conversations API sends no "block finished" event (confirmed against
+     * the OpenAPI spec, 2026-10-04: only `message.output.delta` /
+     * `function.call.delta` exist, no non-delta counterpart) — every output
+     * block is therefore assembled here from its deltas and flushed as
+     * OutputDone only once `conversation.response.done` arrives.
+     *
+     * @var array<int, array{kind: string, text: string, name?: string, call_id?: string}>
+     */
+    private array $aStreamOutputs = [];
+
+    /**
      * Provider-specific headers for every request.
      *
      * @return array Header name => value.
@@ -74,6 +87,47 @@ class MistralAdapter extends AbstractLLMAdapter
     {
         $this->resetWarnings();
 
+        $aBody = $this->buildChatBody($aPayload);
+
+        $aRaw = $this->request(self::BASE_URL . '/conversations', $aBody);
+        return $this->normalizeResponse($aRaw, $aPayload['model'], !empty($aPayload['jsonSchema']));
+    }
+
+    /**
+     * Sends a chat request to the Conversations API and streams the answer.
+     *
+     * Event names confirmed against Mistral's public OpenAPI spec
+     * (docs.mistral.ai/openapi.yaml, `ConversationEvents` schema, 2026-10-04).
+     * Unlike Anthropic/OpenAI, the Conversations API sends no "block
+     * finished" event — see normalizeStreamEvent() for how blocks are
+     * assembled from deltas instead.
+     *
+     * @param array $aPayload Neutral payload, same shape as chat().
+     * @return \Generator<array> Normalized stream events.
+     * @throws TransportException|ApiException If the HTTP request or the API fails.
+     */
+    public function streamChat(array $aPayload): \Generator
+    {
+        $this->resetWarnings();
+        $this->aStreamOutputs = [];
+
+        $aBody          = $this->buildChatBody($aPayload);
+        $bJsonRequested = !empty($aPayload['jsonSchema']);
+
+        foreach ($this->requestStream(self::BASE_URL . '/conversations', $aBody) as $aEvent) {
+            yield from $this->normalizeStreamEvent($aEvent, $aPayload['model'], $bJsonRequested);
+        }
+    }
+
+    /**
+     * Builds the Conversations API request body shared by chat() and streamChat().
+     *
+     * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
+     *                        content, user, tools, effort, jsonSchema.
+     * @return array Request body for POST /conversations.
+     */
+    private function buildChatBody(array $aPayload): array
+    {
         $aBody = [
             'model'  => $aPayload['model'],
             'stream' => false,
@@ -118,8 +172,7 @@ class MistralAdapter extends AbstractLLMAdapter
             $aBody['completion_args'] = $aCompletionArgs;
         }
 
-        $aRaw = $this->request(self::BASE_URL . '/conversations', $aBody);
-        return $this->normalizeResponse($aRaw, $aPayload['model'], !empty($aPayload['jsonSchema']));
+        return $aBody;
     }
 
     // ── Input builder ─────────────────────────────────────────────────────
@@ -275,29 +328,8 @@ class MistralAdapter extends AbstractLLMAdapter
         $aOutputs = [];
 
         foreach ($aRaw['outputs'] ?? [] as $aEntry) {
-            switch ($aEntry['type'] ?? '') {
-                case 'message.output':
-                    $mContent = $aEntry['content'] ?? '';
-                    if (is_string($mContent)) {
-                        if ($mContent !== '') {
-                            $aOutputs[] = ['type' => $bJsonRequested ? 'json' : 'text', 'text' => $mContent];
-                        }
-                    } else {
-                        foreach ($mContent as $aChunk) {
-                            $aOutputs[] = $this->normalizeMessageChunk($aChunk, $bJsonRequested);
-                        }
-                    }
-                    break;
-
-                case 'function.call':
-                    $mArguments = $aEntry['arguments'] ?? '{}';
-                    $aOutputs[] = [
-                        'type'      => 'function_call',
-                        'name'      => $aEntry['name'] ?? '',
-                        'call_id'   => $aEntry['tool_call_id'] ?? '',
-                        'arguments' => is_array($mArguments) ? json_encode($mArguments) : (string) $mArguments,
-                    ];
-                    break;
+            foreach ($this->mapEntryToBlocks($aEntry, $bJsonRequested) as $aBlock) {
+                $aOutputs[] = $aBlock;
             }
         }
 
@@ -309,6 +341,222 @@ class MistralAdapter extends AbstractLLMAdapter
             'errors'        => [],
             'warnings'      => $this->getWarnings(),
         ];
+    }
+
+    /**
+     * Translates one Conversations API output entry into zero or more neutral
+     * output blocks. Used by normalizeResponse() for the buffered response;
+     * streamChat() assembles its blocks differently (flushStreamOutputs()) —
+     * the Conversations API's streaming entries have no non-delta
+     * counterpart to run through this method. Entry types this adapter never
+     * causes the API to return (tool.execution, agent.handoff) are left
+     * unhandled.
+     *
+     * @param array $aEntry         One entry of the Conversations API `outputs` array.
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — a text chunk is
+     *                              then the structured answer and normalizes to type 'json'.
+     * @return array Zero or more normalized output blocks.
+     */
+    private function mapEntryToBlocks(array $aEntry, bool $bJsonRequested): array
+    {
+        $aBlocks = [];
+
+        switch ($aEntry['type'] ?? '') {
+            case 'message.output':
+                $mContent = $aEntry['content'] ?? '';
+                if (is_string($mContent)) {
+                    if ($mContent !== '') {
+                        $aBlocks[] = ['type' => $bJsonRequested ? 'json' : 'text', 'text' => $mContent];
+                    }
+                } else {
+                    foreach ($mContent as $aChunk) {
+                        $aBlocks[] = $this->normalizeMessageChunk($aChunk, $bJsonRequested);
+                    }
+                }
+                break;
+
+            case 'function.call':
+                $mArguments = $aEntry['arguments'] ?? '{}';
+                $aBlocks[] = [
+                    'type'      => 'function_call',
+                    'name'      => $aEntry['name'] ?? '',
+                    'call_id'   => $aEntry['tool_call_id'] ?? '',
+                    'arguments' => is_array($mArguments) ? json_encode($mArguments) : (string) $mArguments,
+                ];
+                break;
+        }
+
+        return $aBlocks;
+    }
+
+    // ── Stream normalizer ────────────────────────────────────────────────
+
+    /**
+     * Translates one decoded SSE event of the Conversations API stream into
+     * zero or more neutral stream events. Confirmed against the
+     * `ConversationEvents` schema in Mistral's OpenAPI spec (2026-10-04):
+     * the SSE `type` values are `conversation.response.started/.done/.error`,
+     * `message.output.delta`, `function.call.delta`, plus `tool.execution.*`
+     * and `agent.handoff.*` for built-in connectors / agents this adapter
+     * never triggers (only `Tool::function()` is translated, see
+     * buildTools()).
+     *
+     * There is no "block finished" event — `message.output.delta` and
+     * `function.call.delta` are the only content-bearing types, each keyed by
+     * `output_index`. Every block is therefore accumulated in
+     * $aStreamOutputs and only turned into an OutputDone once
+     * `conversation.response.done` arrives (flushStreamOutputs()).
+     *
+     * @param array  $aData          Decoded JSON of one SSE event ('data:' line(s)).
+     * @param string $sModel         Model id that was sent in the request (the Conversations
+     *                               API carries no model field of its own, see normalizeResponse()).
+     * @param bool   $bJsonRequested Whether the request carried a jsonSchema.
+     * @return \Generator<array> Zero or more normalized stream events.
+     */
+    private function normalizeStreamEvent(array $aData, string $sModel, bool $bJsonRequested): \Generator
+    {
+        switch ($aData['type'] ?? '') {
+            // Lifecycle marker, carries no content of its own.
+            case 'conversation.response.started':
+                break;
+
+            case 'message.output.delta':
+                $iIndex    = $aData['output_index'] ?? 0;
+                $aFragment = $this->extractContentFragment($aData['content'] ?? '');
+                if ($aFragment === null) {
+                    break; // a chunk type with no textual equivalent (image/file/tool_reference)
+                }
+                [$sKind, $sText] = $aFragment;
+                $this->aStreamOutputs[$iIndex] ??= ['kind' => $sKind, 'text' => ''];
+                $this->aStreamOutputs[$iIndex]['text'] .= $sText;
+                yield [
+                    'type'  => $sKind === 'thinking' ? StreamEventType::ThinkingDelta->value : StreamEventType::TextDelta->value,
+                    'index' => $iIndex,
+                    'delta' => $sText,
+                ];
+                break;
+
+            case 'function.call.delta':
+                $iIndex = $aData['output_index'] ?? 0;
+                $this->aStreamOutputs[$iIndex] ??= ['kind' => 'function_call', 'text' => '', 'name' => '', 'call_id' => ''];
+                if (!empty($aData['name'])) {
+                    $this->aStreamOutputs[$iIndex]['name'] = $aData['name'];
+                }
+                if (!empty($aData['tool_call_id'])) {
+                    $this->aStreamOutputs[$iIndex]['call_id'] = $aData['tool_call_id'];
+                }
+                $sFragment = (string) ($aData['arguments'] ?? '');
+                $this->aStreamOutputs[$iIndex]['text'] .= $sFragment;
+                yield ['type' => StreamEventType::FunctionCallArgumentsDelta->value, 'index' => $iIndex, 'delta' => $sFragment];
+                break;
+
+            case 'conversation.response.done':
+                foreach ($this->flushStreamOutputs($bJsonRequested) as $iIndex => $aBlock) {
+                    yield ['type' => StreamEventType::OutputDone->value, 'index' => $iIndex, 'output' => $aBlock];
+                }
+                yield [
+                    'type' => StreamEventType::ResponseDone->value,
+                    'model' => $sModel,
+                    'input_tokens' => $aData['usage']['prompt_tokens'] ?? 0,
+                    'output_tokens' => $aData['usage']['completion_tokens'] ?? 0,
+                    'warnings' => $this->getWarnings(),
+                ];
+                break;
+
+            case 'conversation.response.error':
+                yield [
+                    'type' => StreamEventType::Error->value,
+                    'error' => ApiException::fromResponse(
+                        (int) ($aData['code'] ?? 0),
+                        (string) ($aData['message'] ?? 'Unknown streaming error'),
+                        ['error' => ['message' => $aData['message'] ?? '']],
+                    ),
+                ];
+                break;
+
+            // Built-in connectors (web_search, code_interpreter, image
+            // generation via agents) and agent handoffs — this adapter never
+            // builds a request that triggers these, so they're intentionally
+            // not mapped rather than guessed at.
+            case 'tool.execution.started':
+            case 'tool.execution.delta':
+            case 'tool.execution.done':
+            case 'agent.handoff.started':
+            case 'agent.handoff.done':
+                break;
+
+            default:
+                $this->warn("Unhandled Mistral stream event type '" . ($aData['type'] ?? '') . "' was skipped. Keys present: " . implode(', ', array_keys($aData)));
+                break;
+        }
+    }
+
+    /**
+     * Turns every output block accumulated in $aStreamOutputs into a
+     * normalized output block, keyed by output_index, and clears the
+     * accumulator. Called once per stream, when conversation.response.done
+     * arrives — see normalizeStreamEvent().
+     *
+     * @param bool $bJsonRequested Whether the request carried a jsonSchema — a text block is
+     *                             then the structured answer and normalizes to type 'json'.
+     * @return array<int, array> Normalized output blocks, keyed by output_index.
+     */
+    private function flushStreamOutputs(bool $bJsonRequested): array
+    {
+        $aResult = [];
+        foreach ($this->aStreamOutputs as $iIndex => $aOutput) {
+            $aResult[$iIndex] = match ($aOutput['kind']) {
+                'text' => ['type' => $bJsonRequested ? 'json' : 'text', 'text' => $aOutput['text']],
+                'thinking' => ['type' => 'thinking', 'thinking' => $aOutput['text']],
+                'function_call' => [
+                    'type' => 'function_call',
+                    'name' => $aOutput['name'] ?? '',
+                    'call_id' => $aOutput['call_id'] ?? '',
+                    'arguments' => $aOutput['text'],
+                ],
+                default => ['type' => 'text', 'text' => $aOutput['text']],
+            };
+        }
+        $this->aStreamOutputs = [];
+        return $aResult;
+    }
+
+    /**
+     * Pulls the readable fragment out of one message.output.delta's
+     * `content` field — a plain string, or a single content chunk object
+     * (`{"type": "text", "text": "..."}` etc., per OutputContentChunks in
+     * the OpenAPI spec — a single chunk, not an array of chunks, unlike the
+     * non-streaming message.output's content). Only text and thinking chunks
+     * have a textual equivalent; image/file/tool_reference chunks don't
+     * stream as text and are skipped.
+     *
+     * @param string|array $mContent The delta event's `content` field.
+     * @return array{0: string, 1: string}|null [kind, text] ('text' or
+     *                                           'thinking'), or null when the
+     *                                           chunk carries no text.
+     */
+    private function extractContentFragment(string|array $mContent): ?array
+    {
+        if (is_string($mContent)) {
+            return ['text', $mContent];
+        }
+
+        switch ($mContent['type'] ?? '') {
+            case 'text':
+                return ['text', $mContent['text'] ?? ''];
+
+            case 'thinking':
+                $sThinking = '';
+                foreach ($mContent['thinking'] ?? [] as $aPart) {
+                    if (($aPart['type'] ?? '') === 'text') {
+                        $sThinking .= $aPart['text'] ?? '';
+                    }
+                }
+                return ['thinking', $sThinking];
+
+            default:
+                return null;
+        }
     }
 
     /**

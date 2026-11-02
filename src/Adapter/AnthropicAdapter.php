@@ -2,6 +2,7 @@
 
 namespace Conduit\Adapter;
 
+use Conduit\Enum\StreamEventType;
 use Conduit\Enum\ToolType;
 use Conduit\Exception\ApiException;
 use Conduit\Exception\TransportException;
@@ -52,6 +53,23 @@ class AnthropicAdapter extends AbstractLLMAdapter
     private array $aRequestBetas = [];
 
     /**
+     * Accumulator state for streamChat(), reset at the start of every call.
+     * content_block_stop carries no content of its own, so the block built
+     * from content_block_start + its content_block_delta events is kept here
+     * (keyed by index) until it's assembled and yielded on stop.
+     *
+     * @var array<int, array>
+     */
+    private array $aStreamBlocks = [];
+
+    /** @var array<int, string> Raw partial_json accumulated per index for input_json_delta. */
+    private array $aStreamJsonBuffers = [];
+
+    private string $sStreamModel        = '';
+    private int    $iStreamInputTokens  = 0;
+    private int    $iStreamOutputTokens = 0;
+
+    /**
      * Provider-specific headers for every request. anthropic-beta is added
      * only when the current request collected a flag in $aRequestBetas.
      *
@@ -94,6 +112,47 @@ class AnthropicAdapter extends AbstractLLMAdapter
         $this->aRequestBetas = [];
         $this->resetWarnings();
 
+        $aBody = $this->buildChatBody($aPayload);
+
+        $aRaw = $this->request(self::BASE_URL . '/messages', $aBody);
+        return $this->normalizeResponse($aRaw, !empty($aPayload['jsonSchema']));
+    }
+
+    /**
+     * Sends a chat request to the Messages API and streams the answer.
+     *
+     * @param array $aPayload Neutral payload, same shape as chat().
+     * @return \Generator<array> Normalized stream events.
+     * @throws TransportException|ApiException If the HTTP request or the API fails.
+     */
+    public function streamChat(array $aPayload): \Generator
+    {
+        $this->aRequestBetas = [];
+        $this->resetWarnings();
+
+        $aBody          = $this->buildChatBody($aPayload);
+        $bJsonRequested = !empty($aPayload['jsonSchema']);
+
+        $this->aStreamBlocks       = [];
+        $this->aStreamJsonBuffers  = [];
+        $this->sStreamModel        = '';
+        $this->iStreamInputTokens  = 0;
+        $this->iStreamOutputTokens = 0;
+
+        foreach ($this->requestStream(self::BASE_URL . '/messages', $aBody) as $aEvent) {
+            yield from $this->normalizeStreamEvent($aEvent, $bJsonRequested);
+        }
+    }
+
+    /**
+     * Builds the Messages API request body shared by chat() and streamChat().
+     *
+     * @param array $aPayload Neutral payload: model, maxTokens, instruction, context,
+     *                        content, tools, jsonSchema, effort, effortSummary.
+     * @return array Request body for POST /messages.
+     */
+    private function buildChatBody(array $aPayload): array
+    {
         $aBody = [
             'model' => $aPayload['model'],
             'max_tokens' => $aPayload['maxTokens'] ?? 1024,
@@ -133,8 +192,7 @@ class AnthropicAdapter extends AbstractLLMAdapter
             }
         }
 
-        $aRaw = $this->request(self::BASE_URL . '/messages', $aBody);
-        return $this->normalizeResponse($aRaw, !empty($aPayload['jsonSchema']));
+        return $aBody;
     }
 
     // ── Input builder ─────────────────────────────────────────────────────
@@ -390,64 +448,9 @@ class AnthropicAdapter extends AbstractLLMAdapter
         $aOutputs = [];
 
         foreach ($aRaw['content'] ?? [] as $aBlock) {
-            switch ($aBlock['type'] ?? '') {
-                case 'text':
-                    $aOutputs[] = [
-                        'type' => $bJsonRequested ? 'json' : 'text',
-                        'text' => $aBlock['text'] ?? '',
-                        'annotations' => $this->normalizeCitations($aBlock['citations'] ?? []),
-                    ];
-                    break;
-
-                case 'server_tool_use':
-                    $aOutputs[] = [
-                        'type' => ($aBlock['name'] ?? '') === 'web_fetch' ? 'web_fetch' : 'web_search',
-                        'status' => 'completed',
-                        'call_id' => $aBlock['id'] ?? '',
-                        'arguments' => json_encode($aBlock['input'] ?? []),
-                    ];
-                    break;
-
-                case 'tool_use':
-                    if (($aBlock['name'] ?? '') === 'web_search') {
-                        $aOutputs[] = [
-                            'type' => 'web_search',
-                            'status' => 'completed',
-                            'call_id' => $aBlock['id'] ?? '',
-                            'arguments' => json_encode($aBlock['input'] ?? []),
-                        ];
-                    } else {
-                        $aOutputs[] = [
-                            'type' => 'function_call',
-                            'name' => $aBlock['name'] ?? '',
-                            'call_id' => $aBlock['id'] ?? '',
-                            'arguments' => json_encode($aBlock['input'] ?? []),
-                        ];
-                    }
-                    break;
-
-                case 'mcp_tool_use':
-                    $aOutputs[] = [
-                        'type'         => 'mcp_call',
-                        'name'         => $aBlock['name'] ?? '',
-                        'server_label' => $aBlock['server_name'] ?? '',
-                        'call_id'      => $aBlock['id'] ?? '',
-                        'arguments'    => json_encode($aBlock['input'] ?? []),
-                    ];
-                    break;
-
-                case 'mcp_tool_result':
-                    $aOutputs[] = [
-                        'type'       => 'mcp_result',
-                        'call_id'    => $aBlock['tool_use_id'] ?? '',
-                        'mcp_error'  => (bool)($aBlock['is_error'] ?? false),
-                        'mcp_output' => $this->flattenMcpResultContent($aBlock['content'] ?? []),
-                    ];
-                    break;
-
-                case 'thinking':
-                    $aOutputs[] = ['type' => 'thinking', 'thinking' => $aBlock['thinking'] ?? ''];
-                    break;
+            $aMapped = $this->mapContentBlockToOutput($aBlock, $bJsonRequested);
+            if ($aMapped !== null) {
+                $aOutputs[] = $aMapped;
             }
         }
 
@@ -459,6 +462,184 @@ class AnthropicAdapter extends AbstractLLMAdapter
             'errors' => [],
             'warnings' => $this->getWarnings(),
         ];
+    }
+
+    /**
+     * Translates one content block into the neutral output format. Shared by
+     * normalizeResponse() (a full block from the buffered response) and
+     * normalizeStreamEvent() (a block assembled from content_block_start +
+     * its deltas) so the mapping rules live in exactly one place.
+     *
+     * @param array $aBlock         A single content block (or, while streaming, its
+     *                              accumulated equivalent — same field names).
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema — a text block is
+     *                              then the structured answer and normalizes to type 'json'.
+     * @return array|null Normalized output block, or null for a block type this adapter doesn't map.
+     */
+    private function mapContentBlockToOutput(array $aBlock, bool $bJsonRequested): ?array
+    {
+        switch ($aBlock['type'] ?? '') {
+            case 'text':
+                return [
+                    'type' => $bJsonRequested ? 'json' : 'text',
+                    'text' => $aBlock['text'] ?? '',
+                    'annotations' => $this->normalizeCitations($aBlock['citations'] ?? []),
+                ];
+
+            case 'server_tool_use':
+                return [
+                    'type' => ($aBlock['name'] ?? '') === 'web_fetch' ? 'web_fetch' : 'web_search',
+                    'status' => 'completed',
+                    'call_id' => $aBlock['id'] ?? '',
+                    'arguments' => json_encode($aBlock['input'] ?? []),
+                ];
+
+            case 'tool_use':
+                if (($aBlock['name'] ?? '') === 'web_search') {
+                    return [
+                        'type' => 'web_search',
+                        'status' => 'completed',
+                        'call_id' => $aBlock['id'] ?? '',
+                        'arguments' => json_encode($aBlock['input'] ?? []),
+                    ];
+                }
+                return [
+                    'type' => 'function_call',
+                    'name' => $aBlock['name'] ?? '',
+                    'call_id' => $aBlock['id'] ?? '',
+                    'arguments' => json_encode($aBlock['input'] ?? []),
+                ];
+
+            case 'mcp_tool_use':
+                return [
+                    'type'         => 'mcp_call',
+                    'name'         => $aBlock['name'] ?? '',
+                    'server_label' => $aBlock['server_name'] ?? '',
+                    'call_id'      => $aBlock['id'] ?? '',
+                    'arguments'    => json_encode($aBlock['input'] ?? []),
+                ];
+
+            case 'mcp_tool_result':
+                return [
+                    'type'       => 'mcp_result',
+                    'call_id'    => $aBlock['tool_use_id'] ?? '',
+                    'mcp_error'  => (bool)($aBlock['is_error'] ?? false),
+                    'mcp_output' => $this->flattenMcpResultContent($aBlock['content'] ?? []),
+                ];
+
+            case 'thinking':
+                return ['type' => 'thinking', 'thinking' => $aBlock['thinking'] ?? ''];
+
+            default:
+                return null;
+        }
+    }
+
+    // ── Stream normalizer ────────────────────────────────────────────────
+
+    /**
+     * Translates one decoded SSE event of the Messages API stream into zero
+     * or more neutral stream events. content_block_stop carries no content of
+     * its own, so the block is assembled from $aStreamBlocks / $aStreamJsonBuffers
+     * (filled by content_block_start / content_block_delta) and mapped via
+     * the same mapContentBlockToOutput() normalizeResponse() uses.
+     *
+     * Known gap: streamed text citations (a possible citations_delta) are not
+     * specifically handled — unknown delta sub-types are skipped rather than
+     * guessed at, so streamed text carries no annotations.
+     *
+     * @param array $aData          Decoded JSON of one SSE event ('data:' line(s)).
+     * @param bool  $bJsonRequested Whether the request carried a jsonSchema.
+     * @return \Generator<array> Zero or more normalized stream events.
+     */
+    private function normalizeStreamEvent(array $aData, bool $bJsonRequested): \Generator
+    {
+        switch ($aData['type'] ?? '') {
+            case 'message_start':
+                $aMessage = $aData['message'] ?? [];
+                $this->sStreamModel = $aMessage['model'] ?? '';
+                $this->iStreamInputTokens = $aMessage['usage']['input_tokens'] ?? 0;
+                $this->iStreamOutputTokens = $aMessage['usage']['output_tokens'] ?? 0;
+                break;
+
+            case 'content_block_start':
+                $iIndex = $aData['index'] ?? 0;
+                $aBlock = $aData['content_block'] ?? [];
+                $this->aStreamBlocks[$iIndex] = $aBlock;
+                $this->aStreamJsonBuffers[$iIndex] = '';
+                $aHint = $this->mapContentBlockToOutput($aBlock, $bJsonRequested);
+                yield [
+                    'type' => StreamEventType::OutputStart->value,
+                    'index' => $iIndex,
+                    'output_type' => $aHint['type'] ?? null,
+                ];
+                break;
+
+            case 'content_block_delta':
+                $iIndex = $aData['index'] ?? 0;
+                $aDelta = $aData['delta'] ?? [];
+                switch ($aDelta['type'] ?? '') {
+                    case 'text_delta':
+                        $sFragment = $aDelta['text'] ?? '';
+                        $this->aStreamBlocks[$iIndex]['text'] = ($this->aStreamBlocks[$iIndex]['text'] ?? '') . $sFragment;
+                        yield ['type' => StreamEventType::TextDelta->value, 'index' => $iIndex, 'delta' => $sFragment];
+                        break;
+
+                    case 'input_json_delta':
+                        $sFragment = $aDelta['partial_json'] ?? '';
+                        $this->aStreamJsonBuffers[$iIndex] = ($this->aStreamJsonBuffers[$iIndex] ?? '') . $sFragment;
+                        yield ['type' => StreamEventType::FunctionCallArgumentsDelta->value, 'index' => $iIndex, 'delta' => $sFragment];
+                        break;
+
+                    case 'thinking_delta':
+                        $sFragment = $aDelta['thinking'] ?? '';
+                        $this->aStreamBlocks[$iIndex]['thinking'] = ($this->aStreamBlocks[$iIndex]['thinking'] ?? '') . $sFragment;
+                        yield ['type' => StreamEventType::ThinkingDelta->value, 'index' => $iIndex, 'delta' => $sFragment];
+                        break;
+
+                    case 'signature_delta':
+                        $this->aStreamBlocks[$iIndex]['signature'] = ($this->aStreamBlocks[$iIndex]['signature'] ?? '') . ($aDelta['signature'] ?? '');
+                        break;
+                }
+                break;
+
+            case 'content_block_stop':
+                $iIndex = $aData['index'] ?? 0;
+                $aBlock = $this->aStreamBlocks[$iIndex] ?? [];
+                if (!empty($this->aStreamJsonBuffers[$iIndex])) {
+                    $aBlock['input'] = json_decode($this->aStreamJsonBuffers[$iIndex], true) ?? [];
+                }
+                unset($this->aStreamBlocks[$iIndex], $this->aStreamJsonBuffers[$iIndex]);
+                $aMapped = $this->mapContentBlockToOutput($aBlock, $bJsonRequested);
+                if ($aMapped !== null) {
+                    yield ['type' => StreamEventType::OutputDone->value, 'index' => $iIndex, 'output' => $aMapped];
+                }
+                break;
+
+            case 'message_delta':
+                if (isset($aData['usage']['output_tokens'])) {
+                    $this->iStreamOutputTokens = $aData['usage']['output_tokens'];
+                }
+                break;
+
+            case 'message_stop':
+                yield [
+                    'type' => StreamEventType::ResponseDone->value,
+                    'model' => $this->sStreamModel,
+                    'input_tokens' => $this->iStreamInputTokens,
+                    'output_tokens' => $this->iStreamOutputTokens,
+                    'warnings' => $this->getWarnings(),
+                ];
+                break;
+
+            case 'error':
+                $aError = $aData['error'] ?? [];
+                yield [
+                    'type' => StreamEventType::Error->value,
+                    'error' => ApiException::fromResponse(0, json_encode($aError), ['error' => $aError]),
+                ];
+                break;
+        }
     }
 
     /**

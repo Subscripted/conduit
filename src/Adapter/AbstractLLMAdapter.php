@@ -155,4 +155,131 @@ abstract class AbstractLLMAdapter implements LLMAdapter
         }
         return $aFormatted;
     }
+
+    /**
+     * Sends a JSON request and yields each server-sent event of the answer as
+     * it arrives, instead of waiting for and buffering the whole response.
+     *
+     * cURL's blocking curl_exec() can't yield from inside its write callback
+     * (yield only works in the generator's own stack frame), so this uses the
+     * curl_multi interface instead: the write callback only appends bytes to
+     * a buffer captured by reference, and this loop — which does run in the
+     * generator's frame — drains complete SSE blocks from that buffer and
+     * yields them between calls to curl_multi_exec().
+     *
+     * Unlike request(), a failure here is never retried: once events have
+     * been yielded to the caller, restarting the request could duplicate
+     * output the caller may already have displayed. The caller decides
+     * whether to retry the whole call.
+     *
+     * @param string $sUrl     Full endpoint URL.
+     * @param array  $aPayload Request body; 'stream' => true is added automatically.
+     * @return \Generator<array> Decoded JSON of each event's `data:` line.
+     * @throws TransportException When the provider was never reached (cURL error).
+     * @throws ApiException When the provider answered with an HTTP error.
+     */
+    protected function requestStream(string $sUrl, array $aPayload): \Generator
+    {
+        $aPayload['stream'] = true;
+        $sJson = json_encode($aPayload);
+
+        $sBuffer  = '';
+        $sRawBody = '';
+        $aPending = [];
+
+        $oCurl = curl_init($sUrl);
+        curl_setopt_array($oCurl, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $sJson,
+            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
+            CURLOPT_CONNECTTIMEOUT => $this->oConfig->getConnectTimeout(),
+            CURLOPT_TIMEOUT        => $this->oConfig->getRequestTimeout(),
+            CURLOPT_WRITEFUNCTION  => function ($oHandle, string $sChunk) use (&$sBuffer, &$sRawBody, &$aPending): int {
+                $sRawBody .= $sChunk;
+                // Normalize CRLF: the SSE spec allows \r\n, and "\r\n\r\n"
+                // contains no "\n\n", so an un-normalized stream would never
+                // hit a block boundary below and buffer the whole response.
+                $sBuffer  .= str_replace("\r\n", "\n", $sChunk);
+                while (($iPos = strpos($sBuffer, "\n\n")) !== false) {
+                    $aPending[] = substr($sBuffer, 0, $iPos);
+                    $sBuffer    = substr($sBuffer, $iPos + 2);
+                }
+                return strlen($sChunk);
+            },
+        ]);
+
+        $oMulti = curl_multi_init();
+        curl_multi_add_handle($oMulti, $oCurl);
+
+        $iRunning = null;
+        do {
+            curl_multi_exec($oMulti, $iRunning);
+            while ($aPending !== []) {
+                $aParsed = $this->parseSseBlock(array_shift($aPending));
+                if ($aParsed !== null) {
+                    yield $aParsed;
+                }
+            }
+            if ($iRunning) {
+                curl_multi_select($oMulti, 1.0);
+            }
+        } while ($iRunning);
+
+        if (trim($sBuffer) !== '') {
+            $aParsed = $this->parseSseBlock($sBuffer);
+            if ($aParsed !== null) {
+                yield $aParsed;
+            }
+        }
+
+        $iHttpCode  = curl_getinfo($oCurl, CURLINFO_HTTP_CODE);
+        $sCurlError = curl_error($oCurl);
+        curl_multi_remove_handle($oMulti, $oCurl);
+        curl_multi_close($oMulti);
+
+        if ($sCurlError) {
+            throw new TransportException("cURL error: {$sCurlError}");
+        }
+        if ($iHttpCode >= 400) {
+            $aDecoded = json_decode($sRawBody, true);
+            throw ApiException::fromResponse($iHttpCode, $sRawBody, is_array($aDecoded) ? $aDecoded : null);
+        }
+    }
+
+    /**
+     * Decodes the `data:` line(s) of one SSE block.
+     *
+     * Adapters discriminate on the payload's own `type` field, since that is
+     * what every provider carries. The `event:` line is only used as a
+     * fallback: when a provider puts the event name solely there and not in
+     * the JSON, it is injected as `type` so the adapters' switch still works.
+     *
+     * @param string $sBlock Raw bytes of one SSE block (between two blank lines).
+     * @return array|null Decoded JSON of the joined `data:` line(s), or null
+     *                     when the block has none or isn't valid JSON (e.g. a
+     *                     stray `[DONE]` sentinel).
+     */
+    private function parseSseBlock(string $sBlock): ?array
+    {
+        $aDataLines = [];
+        $sEventName = '';
+        foreach (explode("\n", $sBlock) as $sLine) {
+            if (str_starts_with($sLine, 'data:')) {
+                $aDataLines[] = ltrim(substr($sLine, 5));
+            } elseif (str_starts_with($sLine, 'event:')) {
+                $sEventName = trim(substr($sLine, 6));
+            }
+        }
+        if ($aDataLines === []) {
+            return null;
+        }
+        $aDecoded = json_decode(implode("\n", $aDataLines), true);
+        if (!is_array($aDecoded)) {
+            return null;
+        }
+        if (!isset($aDecoded['type']) && $sEventName !== '') {
+            $aDecoded['type'] = $sEventName;
+        }
+        return $aDecoded;
+    }
 }
